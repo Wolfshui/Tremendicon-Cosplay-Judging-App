@@ -1,0 +1,9 @@
+name = "tremendicon-cosplay-judging-app"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cosplay_judging"
+database_id = "local-cosplay-judging"
+migrations_dir = "db/migrations"

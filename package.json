@@ -1,0 +1,27 @@
+{
+  "name": "tremendicon-cosplay-judging-app",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply cosplay_judging --local",
+    "db:seed": "wrangler d1 execute cosplay_judging --local --file=./db/seed.sql"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Wolfshui/Tremendicon-Cosplay-Judging-App.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/Wolfshui/Tremendicon-Cosplay-Judging-App/issues"
+  },
+  "homepage": "https://github.com/Wolfshui/Tremendicon-Cosplay-Judging-App#readme",
+  "devDependencies": {
+    "wrangler": "^4.95.0"
+  }
+}
