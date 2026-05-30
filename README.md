@@ -27,6 +27,18 @@ Cloudflare Worker + D1 MVP for managing cosplay tournaments with administrator, 
    npm run dev
    ```
 
+## Cloudflare deployment
+
+This repo is set up as a Cloudflare Worker and can be deployed from GitHub using the workflow in `.github/workflows/deploy.yml`.
+
+Required GitHub secrets:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_D1_DATABASE_ID`
+
+The workflow runs tests, applies D1 migrations, and deploys the Worker on pushes to `main`.
+
 ## Demo accounts
 
 - Admin: `admin@tremendicon.test` / `admin123`
