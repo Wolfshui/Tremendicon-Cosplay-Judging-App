@@ -1,5 +1,5 @@
-const PASSWORD_SALT = 'tremendicon-mvp-salt-v1';
 const SESSION_DAYS = 7;
+const PASSWORD_ITERATIONS = 120000;
 
 const ALLOWED_FIELD_TYPES = new Set([
   'short_text',
@@ -242,10 +242,11 @@ async function registerContestant(request, env) {
   const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
   if (existing) return jsonResponse({ error: 'Email already registered' }, 409);
 
-  const passwordHash = await hashPassword(password);
+  const passwordSalt = generatePasswordSalt();
+  const passwordHash = await hashPassword(password, passwordSalt);
   const result = await env.DB.prepare(
-    'INSERT INTO users (email, password_hash, role, display_name) VALUES (?, ?, ?, ?)'
-  ).bind(email, passwordHash, 'contestant', displayName).run();
+    'INSERT INTO users (email, password_salt, password_hash, role, display_name) VALUES (?, ?, ?, ?, ?)'
+  ).bind(email, passwordSalt, passwordHash, 'contestant', displayName).run();
 
   const userId = result.meta.last_row_id;
   await ensureContestantProfile(env, userId);
@@ -261,10 +262,10 @@ async function login(request, env) {
   const password = payload.password;
   if (!email || !password) return jsonResponse({ error: 'email and password are required' }, 400);
 
-  const user = await env.DB.prepare('SELECT id, email, password_hash, role, display_name, is_active FROM users WHERE email = ?').bind(email).first();
+  const user = await env.DB.prepare('SELECT id, email, password_salt, password_hash, role, display_name, is_active FROM users WHERE email = ?').bind(email).first();
   if (!user || !user.is_active) return jsonResponse({ error: 'Invalid credentials' }, 401);
 
-  const passwordHash = await hashPassword(password);
+  const passwordHash = await hashPassword(password, user.password_salt);
   if (passwordHash !== user.password_hash) return jsonResponse({ error: 'Invalid credentials' }, 401);
 
   const sessionToken = await createSession(env, user.id);
@@ -1504,9 +1505,28 @@ function randomToken() {
   return crypto.randomUUID().replaceAll('-', '');
 }
 
-async function hashPassword(password) {
-  const input = new TextEncoder().encode(`${password}${PASSWORD_SALT}`);
-  const digest = await crypto.subtle.digest('SHA-256', input);
+function generatePasswordSalt() {
+  return crypto.randomUUID();
+}
+
+async function hashPassword(password, salt) {
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const digest = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      hash: 'SHA-256',
+      salt: new TextEncoder().encode(salt),
+      iterations: PASSWORD_ITERATIONS
+    },
+    baseKey,
+    256
+  );
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
@@ -1541,7 +1561,7 @@ export function extractPathParams(pathname, pattern) {
 }
 
 function trimAndSplit(value) {
-  return value.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean);
+  return String(value).split('/').filter(Boolean);
 }
 
 class HttpError extends Error {

@@ -18,10 +18,10 @@ DELETE FROM events;
 DELETE FROM sessions;
 DELETE FROM users;
 
-INSERT INTO users (id, email, password_hash, role, display_name) VALUES
-  (1, 'admin@tremendicon.test', '249e315a119e6cd15b2fb4be6db37257d2bf49334f5d63189fc29e473a7118e7', 'admin', 'Tremendicon Admin'),
-  (2, 'judge@tremendicon.test', 'a9596a22496cee975651ea013dbd6aedb87647fdb83638b63cd1242d645cbc4c', 'judge', 'Head Judge'),
-  (3, 'contestant@tremendicon.test', '5172ba28470114309b7410ad14d396982e2319cba9f23234ea29305b1ee3a9bf', 'contestant', 'Demo Contestant');
+INSERT INTO users (id, email, password_salt, password_hash, role, display_name) VALUES
+  (1, 'admin@tremendicon.test', 'salt-admin-v1', '46e3f99062e01ed7d75e4ed07bf5f9d6884e55427324460d34441e083656b8f7', 'admin', 'Tremendicon Admin'),
+  (2, 'judge@tremendicon.test', 'salt-judge-v1', 'b45548723b8d4d9ad363c3f68f4fd5283a39616a12036aa110a9eeaaa9101449', 'judge', 'Head Judge'),
+  (3, 'contestant@tremendicon.test', 'salt-contestant-v1', 'ade962ea498998b88e07238a94de37f0dec5f1a5b3fd3174d1a31feebe18cf2d', 'contestant', 'Demo Contestant');
 
 INSERT INTO events (id, name, slug, description, home_content_json, navigation_json, branding_json, moderation_enabled, is_public)
 VALUES (
