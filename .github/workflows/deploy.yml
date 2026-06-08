@@ -31,12 +31,25 @@ jobs:
 
       - name: Prepare production config
         run: |
-          node -e "
-            const fs = require('fs');
-            let config = fs.readFileSync('wrangler.toml', 'utf-8');
-            config = config.replace(/database_id = \"[^\"]*\"/, \`database_id = \"\${process.env.CLOUDFLARE_D1_DATABASE_ID}\"\`);
-            fs.writeFileSync('wrangler.toml', config);
-          "
+          python3 <<'EOF'
+import os
+import re
+
+db_id = os.environ.get('CLOUDFLARE_D1_DATABASE_ID', '').strip()
+if not db_id:
+    print('ERROR: CLOUDFLARE_D1_DATABASE_ID is not set')
+    exit(1)
+
+with open('wrangler.toml', 'r') as f:
+    config = f.read()
+
+config = re.sub(r'database_id = "[^"]*"', f'database_id = "{db_id}"', config)
+
+with open('wrangler.toml', 'w') as f:
+    f.write(config)
+
+print(f'✓ Updated database_id')
+EOF
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
 
