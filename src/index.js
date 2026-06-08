@@ -43,6 +43,10 @@ async function routeRequest(request, env) {
     const user = await requireRole(request, env, ['judge', 'admin']);
     return renderRolePortal('judge', user);
   }
+  if (request.method === 'GET' && pathname === '/contestant') {
+    const user = await requireRole(request, env, ['contestant']);
+    return renderRolePortal('contestant', user);
+  }
   if (request.method === 'GET' && matchPath(pathname, '/events/:eventSlug')) {
     const { eventSlug } = extractPathParams(pathname, '/events/:eventSlug');
     return getPublicEventPage(env, eventSlug);
@@ -540,7 +544,7 @@ async function renderHome(env) {
     <hr class="neon-divider" />
 
     <section class="glass-panel">
-      <p><a class="button-link" href="/login">Admin and Judge Login</a></p>
+      <p><a class="button-link" href="/login">Login Portal (Admin, Judge, Contestant)</a></p>
       <h2 class="neon-title" style="font-size: 1.1rem; margin-top: 6px;">Active Events</h2>
       <ul class="event-list">${items || '<li>No public events yet.</li>'}</ul>
     </section>
@@ -563,8 +567,8 @@ function renderLoginPage() {
 <body>
   <main class="neon-shell center-shell">
     <div class="chrome-logo" style="font-size: clamp(1.1rem, 4vw, 1.7rem);">Tremendicon Access</div>
-    <h1 class="neon-title">Admin and Judge Login</h1>
-    <p class="neon-subtitle">Authenticate to access your mission-control portal.</p>
+    <h1 class="neon-title">Account Login</h1>
+    <p class="neon-subtitle">Authenticate to access your mission-control portal (admin, judge, or contestant).</p>
     <hr class="neon-divider" />
     <section class="glass-panel">
       <form id="login-form">
@@ -580,7 +584,7 @@ function renderLoginPage() {
       <div class="row">
         <a class="button-link" href="/register">Register New Account</a>
       </div>
-      <p class="neon-subtitle" style="font-size: 0.88rem; margin-top: 12px;">Demo: admin@tremendicon.test / admin123, judge@tremendicon.test / judge123</p>
+      <p class="neon-subtitle" style="font-size: 0.88rem; margin-top: 12px;">Demo: admin@tremendicon.test / admin123, judge@tremendicon.test / judge123, contestant@tremendicon.test / contestant123</p>
     </section>
   </main>
 
@@ -637,8 +641,13 @@ function renderLoginPage() {
           window.location.assign('/judge');
           return;
         }
+        if (role === 'contestant') {
+          showMessage('Welcome contestant. Redirecting...', 'ok');
+          window.location.assign('/contestant');
+          return;
+        }
 
-        showMessage('This login is for admin/judge accounts only.', 'error');
+        showMessage('Login succeeded, but this role has no portal configured.', 'error');
       } catch {
         showMessage('Network error while signing in.', 'error');
       } finally {
@@ -665,7 +674,7 @@ function renderRegisterPage() {
   <main class="neon-shell center-shell">
     <div class="chrome-logo" style="font-size: clamp(1.1rem, 4vw, 1.7rem);">Contestant Creation Console</div>
     <h1 class="neon-title">Create Contestant Account</h1>
-    <p class="neon-subtitle">Register your identity beacon, then return to login for admin or judge portals.</p>
+    <p class="neon-subtitle">Register your identity beacon, then return to login to access your contestant, admin, or judge portal.</p>
     <hr class="neon-divider" />
     <section class="glass-panel">
       <form id="register-form">
@@ -741,7 +750,7 @@ function renderRegisterPage() {
 }
 
 function renderRolePortal(portal, user) {
-  const title = portal === 'admin' ? 'Admin Portal' : 'Judge Portal';
+  const title = portal === 'admin' ? 'Admin Portal' : (portal === 'judge' ? 'Judge Portal' : 'Contestant Portal');
   const dashboard = portal === 'admin'
     ? `
     <section class="glass-panel controls">
@@ -822,7 +831,7 @@ function renderRolePortal(portal, user) {
         </table>
       </div>
     </section>`
-    : `
+    : portal === 'judge' ? `
     <section class="glass-panel controls">
       <h2>Judge Tools</h2>
       <div class="grid three">
@@ -897,6 +906,36 @@ function renderRolePortal(portal, user) {
           </thead>
           <tbody id="schedule-table"></tbody>
         </table>
+      </div>
+    </section>`
+    : `
+    <section class="glass-panel controls">
+      <h2>Contestant Tools</h2>
+      <div class="grid two">
+        <label>Competition ID
+          <input id="competition-id" type="number" min="1" value="1" />
+        </label>
+        <label>Entry ID
+          <input id="entry-id" type="number" min="1" value="1" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="load-form-fields" class="primary" type="button">Load Form Fields</button>
+        <button id="save-draft" type="button">Save Draft</button>
+        <button id="load-schedule" type="button">Load My Schedule</button>
+      </div>
+      <div class="row">
+        <button id="load-review" type="button">Load Review</button>
+        <button id="submit-entry" type="button">Submit Entry</button>
+        <button id="load-results" type="button">Load Results</button>
+      </div>
+      <p id="flash" class="flash"></p>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Response</h2>
+      <div class="table-wrap">
+        <pre id="contestant-output" style="margin:0; white-space:pre-wrap; color:#cfe9ff; font-size:0.9rem;"></pre>
       </div>
     </section>`;
 
@@ -1026,7 +1065,7 @@ function renderRolePortal(portal, user) {
     updateCsvLinks();
     loadDashboard();
     loadSchedule();`
-    : `
+    : portal === 'judge' ? `
     const flash = document.getElementById('flash');
     const contestantTable = document.getElementById('contestant-table');
     const leaderboardTable = document.getElementById('leaderboard-table');
@@ -1152,7 +1191,109 @@ function renderRolePortal(portal, user) {
 
     searchContestants();
     loadLeaderboard();
-    loadSchedule();`;
+    loadSchedule();`
+    : `
+    const flash = document.getElementById('flash');
+    const output = document.getElementById('contestant-output');
+    const competitionIdInput = document.getElementById('competition-id');
+    const entryIdInput = document.getElementById('entry-id');
+
+    const showFlash = (text, isError) => {
+      flash.textContent = text;
+      flash.className = isError ? 'flash error' : 'flash';
+    };
+
+    const showOutput = (data) => {
+      output.textContent = JSON.stringify(data, null, 2);
+    };
+
+    const fetchJson = async (path, options = {}) => {
+      const response = await fetch(path, options);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Request failed');
+      return body;
+    };
+
+    const competitionId = () => Number(competitionIdInput.value) || 1;
+    const entryId = () => Number(entryIdInput.value) || 1;
+
+    document.getElementById('load-form-fields').addEventListener('click', async () => {
+      try {
+        showFlash('Loading form fields...');
+        const data = await fetchJson('/contestant/form-fields?competitionId=' + competitionId());
+        showOutput(data);
+        showFlash('Form fields loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    });
+
+    document.getElementById('save-draft').addEventListener('click', async () => {
+      try {
+        showFlash('Saving draft...');
+        const data = await fetchJson('/competitions/' + competitionId() + '/apply', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ submission: {}, consents: {} })
+        });
+        showOutput(data);
+        showFlash('Draft saved.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    });
+
+    document.getElementById('load-schedule').addEventListener('click', async () => {
+      try {
+        showFlash('Loading schedule...');
+        const data = await fetchJson('/contestant/schedule');
+        showOutput(data);
+        showFlash('Schedule loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    });
+
+    document.getElementById('load-review').addEventListener('click', async () => {
+      try {
+        showFlash('Loading entry review...');
+        const data = await fetchJson('/entries/' + entryId() + '/review');
+        showOutput(data);
+        showFlash('Entry review loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    });
+
+    document.getElementById('submit-entry').addEventListener('click', async () => {
+      try {
+        showFlash('Submitting entry...');
+        const data = await fetchJson('/entries/' + entryId() + '/submit', { method: 'POST' });
+        showOutput(data);
+        showFlash('Entry submitted.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    });
+
+    document.getElementById('load-results').addEventListener('click', async () => {
+      try {
+        showFlash('Loading results...');
+        const data = await fetchJson('/contestant/results/' + entryId());
+        showOutput(data);
+        showFlash('Results loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    });
+
+    // quick default view for signed-in contestants
+    fetchJson('/contestant/schedule').then((data) => {
+      showOutput(data);
+      showFlash('Welcome! Schedule loaded.');
+    }).catch((error) => {
+      showFlash(error.message, true);
+    });`;
 
   return new Response(`<!doctype html>
 <html>
