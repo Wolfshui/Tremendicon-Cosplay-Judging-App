@@ -59,6 +59,11 @@ async function routeRequest(request, env) {
     if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
     return renderPortalPage(user, 'event-setup');
   }
+  if (request.method === 'GET' && pathname === '/portal/event-settings') {
+    const user = await requireRole(request, env, ['admin'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
+    return renderPortalPage(user, 'event-settings');
+  }
   if (request.method === 'GET' && pathname === '/portal/contestant-selection') {
     const user = await requireRole(request, env, ['admin', 'judge'], { allowPasswordResetPending: true });
     if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
@@ -189,6 +194,15 @@ async function routeRequest(request, env) {
   if (request.method === 'POST' && pathname === '/admin/profile') {
     const user = await requireRole(request, env, ['admin']);
     return adminUpdateProfile(request, env, user);
+  }
+  if (request.method === 'GET' && pathname === '/admin/events') {
+    const user = await requireRole(request, env, ['admin']);
+    return adminListEvents(url, env, user);
+  }
+  if (request.method === 'POST' && matchPath(pathname, '/admin/events/:eventId/status')) {
+    const user = await requireRole(request, env, ['admin']);
+    const { eventId } = extractPathParams(pathname, '/admin/events/:eventId/status');
+    return adminSetEventStatus(request, env, user, Number(eventId));
   }
 
   if (pathname.startsWith('/admin/')) {
@@ -632,7 +646,7 @@ async function renderHome(env) {
     `SELECT e.id, e.name, e.slug, e.description,
       (SELECT COUNT(*) FROM competitions c WHERE c.event_id = e.id AND c.is_active = 1) AS active_competitions
      FROM events e
-     WHERE e.is_public = 1
+     WHERE e.is_public = 1 AND e.is_active = 1
      ORDER BY e.created_at DESC`
   ).all();
 
@@ -1008,6 +1022,7 @@ function renderPortalPage(user, page) {
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', href: '/portal/dashboard', roles: ['admin', 'judge'] },
     { key: 'event-setup', label: 'Event Setup', href: '/portal/event-setup', roles: ['admin'] },
+    { key: 'event-settings', label: 'Event Settings', href: '/portal/event-settings', roles: ['admin'] },
     { key: 'contestant-selection', label: 'Contestant Selection', href: '/portal/contestant-selection', roles: ['admin', 'judge'] },
     { key: 'user-settings', label: 'User Settings', href: '/portal/user-settings', roles: ['admin'] }
   ].filter((item) => item.roles.includes(user.role));
@@ -1016,6 +1031,7 @@ function renderPortalPage(user, page) {
   const titleByPage = {
     dashboard: 'Dashboard',
     'event-setup': 'Event Setup',
+    'event-settings': 'Event Settings',
     'contestant-selection': 'Contestant Selection',
     'user-settings': 'User Settings'
   };
@@ -1390,6 +1406,137 @@ function renderPortalPage(user, page) {
         showFlash('Contestant question saved.');
       } catch (error) { showFlash(error.message, true); }
     });`;
+  }
+
+  if (activeNav.key === 'event-settings') {
+    content = `
+    <section class="glass-panel controls">
+      <h2>Event Settings</h2>
+      <p class="neon-subtitle">Select an event, filter active/all events, and close/reopen events.</p>
+
+      <div class="grid two">
+        <label>Event List Filter
+          <select id="show-all-events">
+            <option value="0" selected>Active events only</option>
+            <option value="1">All events</option>
+          </select>
+        </label>
+        <label>Select Event
+          <select id="event-selector"></select>
+        </label>
+      </div>
+
+      <div class="row">
+        <button id="reload-events" type="button">Reload Events</button>
+        <button id="close-event" type="button">Close Event</button>
+        <button id="reopen-event" type="button">Re-open Event</button>
+      </div>
+
+      <p id="flash" class="flash"></p>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Selected Event</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Slug</th>
+              <th>Active</th>
+              <th>Public</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="event-details"></tbody>
+        </table>
+      </div>
+    </section>`;
+
+    script = `
+    const flash = document.getElementById('flash');
+    const showAllSelect = document.getElementById('show-all-events');
+    const eventSelector = document.getElementById('event-selector');
+    const eventDetails = document.getElementById('event-details');
+
+    const showFlash = (text, isError) => {
+      flash.textContent = text;
+      flash.className = isError ? 'flash error' : 'flash';
+    };
+    const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+    const fetchJson = async (path, options = {}) => {
+      const response = await fetch(path, options);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Request failed');
+      return body;
+    };
+
+    let cachedEvents = [];
+
+    const renderSelected = () => {
+      const selectedId = Number(eventSelector.value);
+      const row = cachedEvents.find((event) => event.id === selectedId);
+      if (!row) {
+        eventDetails.innerHTML = '<tr><td colspan="6">No event selected.</td></tr>';
+        return;
+      }
+
+      eventDetails.innerHTML = '<tr>' +
+        '<td>' + safe(toText(row.id)) + '</td>' +
+        '<td>' + safe(toText(row.name)) + '</td>' +
+        '<td>' + safe(toText(row.slug)) + '</td>' +
+        '<td>' + (row.is_active ? 'Yes' : 'No') + '</td>' +
+        '<td>' + (row.is_public ? 'Yes' : 'No') + '</td>' +
+        '<td>' + safe(toText(row.created_at)) + '</td>' +
+        '</tr>';
+    };
+
+    const loadEvents = async () => {
+      try {
+        showFlash('Loading events...');
+        const includeInactive = showAllSelect.value === '1' ? 1 : 0;
+        const data = await fetchJson('/admin/events?includeInactive=' + includeInactive);
+        cachedEvents = data.events || [];
+        eventSelector.innerHTML = cachedEvents.length
+          ? cachedEvents.map((event) => '<option value="' + event.id + '">' + safe(event.name) + ' (#' + event.id + ')' + (event.is_active ? '' : ' [closed]') + '</option>').join('')
+          : '<option value="">No events found</option>';
+        renderSelected();
+        showFlash('Events loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    const updateStatus = async (isActive) => {
+      const eventId = Number(eventSelector.value);
+      if (!eventId) {
+        showFlash('Select an event first.', true);
+        return;
+      }
+
+      try {
+        showFlash(isActive ? 'Re-opening event...' : 'Closing event...');
+        await fetchJson('/admin/events/' + eventId + '/status', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ isActive })
+        });
+        showFlash(isActive ? 'Event re-opened.' : 'Event closed.');
+        await loadEvents();
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    showAllSelect.addEventListener('change', loadEvents);
+    eventSelector.addEventListener('change', renderSelected);
+    document.getElementById('reload-events').addEventListener('click', loadEvents);
+    document.getElementById('close-event').addEventListener('click', () => updateStatus(false));
+    document.getElementById('reopen-event').addEventListener('click', () => updateStatus(true));
+
+    loadEvents();`;
   }
 
   if (activeNav.key === 'contestant-selection') {
@@ -2281,7 +2428,7 @@ function renderRolePortal(portal, user) {
 }
 
 async function getPublicEventPage(env, eventSlug) {
-  const event = await env.DB.prepare('SELECT * FROM events WHERE slug = ? AND is_public = 1').bind(eventSlug).first();
+  const event = await env.DB.prepare('SELECT * FROM events WHERE slug = ? AND is_public = 1 AND is_active = 1').bind(eventSlug).first();
   if (!event) return jsonResponse({ error: 'Event not found' }, 404);
 
   const competitions = await env.DB.prepare(
@@ -2299,7 +2446,7 @@ async function getPublicCompetitionPage(env, eventSlug, competitionSlug) {
     `SELECT c.*, e.name AS event_name, e.slug AS event_slug
      FROM competitions c
      JOIN events e ON e.id = c.event_id
-     WHERE e.slug = ? AND c.slug = ? AND e.is_public = 1`
+     WHERE e.slug = ? AND c.slug = ? AND e.is_public = 1 AND e.is_active = 1`
   ).bind(eventSlug, competitionSlug).first();
 
   if (!competition) return jsonResponse({ error: 'Competition not found' }, 404);
@@ -2969,6 +3116,49 @@ async function adminUpdateProfile(request, env, user) {
   return jsonResponse({ message: 'Profile updated' });
 }
 
+async function adminListEvents(url, env, _user) {
+  const includeInactive = String(url.searchParams.get('includeInactive') || '0') === '1';
+  const rows = await env.DB.prepare(
+    `SELECT id, name, slug, description, is_public, is_active, created_at, updated_at
+     FROM events
+     WHERE (? = 1 OR is_active = 1)
+     ORDER BY created_at DESC`
+  ).bind(includeInactive ? 1 : 0).all();
+
+  return jsonResponse({ events: rows.results || [] });
+}
+
+async function adminSetEventStatus(request, env, user, eventId) {
+  if (!eventId) return jsonResponse({ error: 'eventId is required' }, 400);
+
+  const payload = await parseJsonBody(request);
+  if (typeof payload.isActive !== 'boolean') {
+    return jsonResponse({ error: 'isActive boolean is required' }, 400);
+  }
+
+  const existing = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(eventId).first();
+  if (!existing) return jsonResponse({ error: 'Event not found' }, 404);
+
+  await env.DB.prepare(
+    `UPDATE events
+     SET is_active = ?,
+         is_public = CASE WHEN ? = 0 THEN 0 ELSE is_public END,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  ).bind(payload.isActive ? 1 : 0, payload.isActive ? 1 : 0, eventId).run();
+
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: payload.isActive ? 'event_reopened' : 'event_closed',
+    eventId,
+    targetType: 'event',
+    targetId: String(eventId),
+    details: { isActive: payload.isActive }
+  });
+
+  return jsonResponse({ message: payload.isActive ? 'Event re-opened' : 'Event closed', eventId, isActive: payload.isActive });
+}
+
 async function upsertEvent(request, env, user) {
   const payload = await parseJsonBody(request);
   const name = String(payload.name || '').trim();
@@ -2990,7 +3180,7 @@ async function upsertEvent(request, env, user) {
       await env.DB.prepare(
         `UPDATE events
          SET name = ?, slug = ?, description = ?, home_content_json = ?, navigation_json = ?, branding_json = ?,
-             moderation_enabled = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+             moderation_enabled = ?, is_public = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`
       ).bind(
         name,
@@ -3001,6 +3191,7 @@ async function upsertEvent(request, env, user) {
         JSON.stringify(payload.branding || {}),
         payload.moderationEnabled ? 1 : 0,
         payload.isPublic === false ? 0 : 1,
+        payload.isActive === false ? 0 : 1,
         payload.id
       ).run();
     } catch (error) {
@@ -3015,8 +3206,8 @@ async function upsertEvent(request, env, user) {
   let result;
   try {
     result = await env.DB.prepare(
-      `INSERT INTO events (name, slug, description, home_content_json, navigation_json, branding_json, moderation_enabled, is_public)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO events (name, slug, description, home_content_json, navigation_json, branding_json, moderation_enabled, is_public, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       name,
       slug,
@@ -3025,7 +3216,8 @@ async function upsertEvent(request, env, user) {
       JSON.stringify(payload.navigation || []),
       JSON.stringify(payload.branding || {}),
       payload.moderationEnabled ? 1 : 0,
-      payload.isPublic === false ? 0 : 1
+      payload.isPublic === false ? 0 : 1,
+      payload.isActive === false ? 0 : 1
     ).run();
   } catch (error) {
     if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Event slug already exists' }, 409);
