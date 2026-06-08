@@ -2971,43 +2971,66 @@ async function adminUpdateProfile(request, env, user) {
 
 async function upsertEvent(request, env, user) {
   const payload = await parseJsonBody(request);
-  if (!payload.name || !payload.slug) return jsonResponse({ error: 'name and slug are required' }, 400);
+  const name = String(payload.name || '').trim();
+  const slug = String(payload.slug || '').trim();
+  if (!name || !slug) return jsonResponse({ error: 'name and slug are required' }, 400);
 
   if (payload.id) {
-    await env.DB.prepare(
-      `UPDATE events
-       SET name = ?, slug = ?, description = ?, home_content_json = ?, navigation_json = ?, branding_json = ?,
-           moderation_enabled = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).bind(
-      payload.name,
-      payload.slug,
-      payload.description || null,
-      JSON.stringify(payload.homeContent || {}),
-      JSON.stringify(payload.navigation || []),
-      JSON.stringify(payload.branding || {}),
-      payload.moderationEnabled ? 1 : 0,
-      payload.isPublic === false ? 0 : 1,
-      payload.id
-    ).run();
+    const existing = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(payload.id).first();
+    if (!existing) return jsonResponse({ error: 'Event not found' }, 404);
+  }
+
+  const duplicateSlug = payload.id
+    ? await env.DB.prepare('SELECT id FROM events WHERE slug = ? AND id != ?').bind(slug, payload.id).first()
+    : await env.DB.prepare('SELECT id FROM events WHERE slug = ?').bind(slug).first();
+  if (duplicateSlug) return jsonResponse({ error: 'Event slug already exists' }, 409);
+
+  if (payload.id) {
+    try {
+      await env.DB.prepare(
+        `UPDATE events
+         SET name = ?, slug = ?, description = ?, home_content_json = ?, navigation_json = ?, branding_json = ?,
+             moderation_enabled = ?, is_public = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      ).bind(
+        name,
+        slug,
+        payload.description || null,
+        JSON.stringify(payload.homeContent || {}),
+        JSON.stringify(payload.navigation || []),
+        JSON.stringify(payload.branding || {}),
+        payload.moderationEnabled ? 1 : 0,
+        payload.isPublic === false ? 0 : 1,
+        payload.id
+      ).run();
+    } catch (error) {
+      if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Event slug already exists' }, 409);
+      throw error;
+    }
 
     await logAudit(env, { actorUserId: user.id, action: 'event_updated', eventId: payload.id, targetType: 'event', targetId: String(payload.id), details: payload });
     return jsonResponse({ message: 'Event updated', eventId: payload.id });
   }
 
-  const result = await env.DB.prepare(
-    `INSERT INTO events (name, slug, description, home_content_json, navigation_json, branding_json, moderation_enabled, is_public)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    payload.name,
-    payload.slug,
-    payload.description || null,
-    JSON.stringify(payload.homeContent || {}),
-    JSON.stringify(payload.navigation || []),
-    JSON.stringify(payload.branding || {}),
-    payload.moderationEnabled ? 1 : 0,
-    payload.isPublic === false ? 0 : 1
-  ).run();
+  let result;
+  try {
+    result = await env.DB.prepare(
+      `INSERT INTO events (name, slug, description, home_content_json, navigation_json, branding_json, moderation_enabled, is_public)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      name,
+      slug,
+      payload.description || null,
+      JSON.stringify(payload.homeContent || {}),
+      JSON.stringify(payload.navigation || []),
+      JSON.stringify(payload.branding || {}),
+      payload.moderationEnabled ? 1 : 0,
+      payload.isPublic === false ? 0 : 1
+    ).run();
+  } catch (error) {
+    if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Event slug already exists' }, 409);
+    throw error;
+  }
 
   const eventId = result.meta.last_row_id;
   await logAudit(env, { actorUserId: user.id, action: 'event_created', eventId, targetType: 'event', targetId: String(eventId), details: payload });
@@ -3016,35 +3039,58 @@ async function upsertEvent(request, env, user) {
 
 async function upsertCompetition(request, env, user) {
   const payload = await parseJsonBody(request);
-  if (!payload.eventId || !payload.name || !payload.slug || !payload.division) {
+  const eventId = Number(payload.eventId);
+  const name = String(payload.name || '').trim();
+  const slug = String(payload.slug || '').trim();
+  const division = String(payload.division || '').trim();
+  if (!eventId || !name || !slug || !division) {
     return jsonResponse({ error: 'eventId, name, slug and division are required' }, 400);
   }
 
+  const eventExists = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(eventId).first();
+  if (!eventExists) return jsonResponse({ error: 'Event not found' }, 404);
+
   if (payload.id) {
-    await env.DB.prepare(
-      `UPDATE competitions
-       SET event_id = ?, name = ?, slug = ?, division = ?, is_active = ?, feedback_visible = ?,
-           public_content_json = ?, rules_content = ?, prizes_content = ?, deadline = ?, faq_json = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).bind(
-      payload.eventId,
-      payload.name,
-      payload.slug,
-      payload.division,
-      payload.isActive === false ? 0 : 1,
-      payload.feedbackVisible ? 1 : 0,
-      JSON.stringify(payload.publicContent || {}),
-      payload.rulesContent || '',
-      payload.prizesContent || '',
-      payload.deadline || null,
-      JSON.stringify(payload.faq || []),
-      payload.id
-    ).run();
+    const existing = await env.DB.prepare('SELECT id FROM competitions WHERE id = ?').bind(payload.id).first();
+    if (!existing) return jsonResponse({ error: 'Competition not found' }, 404);
+  }
+
+  const duplicateSlug = payload.id
+    ? await env.DB.prepare('SELECT id FROM competitions WHERE event_id = ? AND slug = ? AND id != ?').bind(eventId, slug, payload.id).first()
+    : await env.DB.prepare('SELECT id FROM competitions WHERE event_id = ? AND slug = ?').bind(eventId, slug).first();
+  if (duplicateSlug) return jsonResponse({ error: 'Competition slug already exists for this event' }, 409);
+
+  if (payload.id) {
+    try {
+      await env.DB.prepare(
+        `UPDATE competitions
+         SET event_id = ?, name = ?, slug = ?, division = ?, is_active = ?, feedback_visible = ?,
+             public_content_json = ?, rules_content = ?, prizes_content = ?, deadline = ?, faq_json = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`
+      ).bind(
+        eventId,
+        name,
+        slug,
+        division,
+        payload.isActive === false ? 0 : 1,
+        payload.feedbackVisible ? 1 : 0,
+        JSON.stringify(payload.publicContent || {}),
+        payload.rulesContent || '',
+        payload.prizesContent || '',
+        payload.deadline || null,
+        JSON.stringify(payload.faq || []),
+        payload.id
+      ).run();
+    } catch (error) {
+      if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Event not found' }, 404);
+      if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Competition slug already exists for this event' }, 409);
+      throw error;
+    }
 
     await logAudit(env, {
       actorUserId: user.id,
       action: 'competition_updated',
-      eventId: payload.eventId,
+      eventId,
       competitionId: payload.id,
       targetType: 'competition',
       targetId: String(payload.id),
@@ -3053,28 +3099,35 @@ async function upsertCompetition(request, env, user) {
     return jsonResponse({ message: 'Competition updated', competitionId: payload.id });
   }
 
-  const insert = await env.DB.prepare(
-    `INSERT INTO competitions (event_id, name, slug, division, is_active, feedback_visible, public_content_json, rules_content, prizes_content, deadline, faq_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    payload.eventId,
-    payload.name,
-    payload.slug,
-    payload.division,
-    payload.isActive === false ? 0 : 1,
-    payload.feedbackVisible ? 1 : 0,
-    JSON.stringify(payload.publicContent || {}),
-    payload.rulesContent || '',
-    payload.prizesContent || '',
-    payload.deadline || null,
-    JSON.stringify(payload.faq || [])
-  ).run();
+  let insert;
+  try {
+    insert = await env.DB.prepare(
+      `INSERT INTO competitions (event_id, name, slug, division, is_active, feedback_visible, public_content_json, rules_content, prizes_content, deadline, faq_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      eventId,
+      name,
+      slug,
+      division,
+      payload.isActive === false ? 0 : 1,
+      payload.feedbackVisible ? 1 : 0,
+      JSON.stringify(payload.publicContent || {}),
+      payload.rulesContent || '',
+      payload.prizesContent || '',
+      payload.deadline || null,
+      JSON.stringify(payload.faq || [])
+    ).run();
+  } catch (error) {
+    if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Event not found' }, 404);
+    if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Competition slug already exists for this event' }, 409);
+    throw error;
+  }
 
   const competitionId = insert.meta.last_row_id;
   await logAudit(env, {
     actorUserId: user.id,
     action: 'competition_created',
-    eventId: payload.eventId,
+    eventId,
     competitionId,
     targetType: 'competition',
     targetId: String(competitionId),
@@ -3086,25 +3139,54 @@ async function upsertCompetition(request, env, user) {
 
 async function upsertRound(request, env, user) {
   const payload = await parseJsonBody(request);
-  if (!payload.competitionId || !payload.name || !payload.roundNumber) {
+  const competitionId = Number(payload.competitionId);
+  const name = String(payload.name || '').trim();
+  const roundNumber = Number(payload.roundNumber);
+  if (!competitionId || !name || !roundNumber) {
     return jsonResponse({ error: 'competitionId, name and roundNumber are required' }, 400);
   }
 
+  const competition = await env.DB.prepare('SELECT id FROM competitions WHERE id = ?').bind(competitionId).first();
+  if (!competition) return jsonResponse({ error: 'Competition not found' }, 404);
+
   if (payload.id) {
-    await env.DB.prepare(
-      'UPDATE rounds SET competition_id = ?, name = ?, round_number = ?, is_active = ? WHERE id = ?'
-    ).bind(payload.competitionId, payload.name, payload.roundNumber, payload.isActive === false ? 0 : 1, payload.id).run();
+    const existingRound = await env.DB.prepare('SELECT id FROM rounds WHERE id = ?').bind(payload.id).first();
+    if (!existingRound) return jsonResponse({ error: 'Round not found' }, 404);
+  }
+
+  const duplicateRoundNumber = payload.id
+    ? await env.DB.prepare('SELECT id FROM rounds WHERE competition_id = ? AND round_number = ? AND id != ?').bind(competitionId, roundNumber, payload.id).first()
+    : await env.DB.prepare('SELECT id FROM rounds WHERE competition_id = ? AND round_number = ?').bind(competitionId, roundNumber).first();
+  if (duplicateRoundNumber) return jsonResponse({ error: 'Round number already exists for this competition' }, 409);
+
+  if (payload.id) {
+    try {
+      await env.DB.prepare(
+        'UPDATE rounds SET competition_id = ?, name = ?, round_number = ?, is_active = ? WHERE id = ?'
+      ).bind(competitionId, name, roundNumber, payload.isActive === false ? 0 : 1, payload.id).run();
+    } catch (error) {
+      if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Competition not found' }, 404);
+      if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Round number already exists for this competition' }, 409);
+      throw error;
+    }
     return jsonResponse({ message: 'Round updated', roundId: payload.id });
   }
 
-  const insert = await env.DB.prepare(
-    'INSERT INTO rounds (competition_id, name, round_number, is_active) VALUES (?, ?, ?, ?)'
-  ).bind(payload.competitionId, payload.name, payload.roundNumber, payload.isActive === false ? 0 : 1).run();
+  let insert;
+  try {
+    insert = await env.DB.prepare(
+      'INSERT INTO rounds (competition_id, name, round_number, is_active) VALUES (?, ?, ?, ?)'
+    ).bind(competitionId, name, roundNumber, payload.isActive === false ? 0 : 1).run();
+  } catch (error) {
+    if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Competition not found' }, 404);
+    if (isDbConstraintError(error, 'unique')) return jsonResponse({ error: 'Round number already exists for this competition' }, 409);
+    throw error;
+  }
 
   await logAudit(env, {
     actorUserId: user.id,
     action: 'round_created',
-    competitionId: payload.competitionId,
+    competitionId,
     targetType: 'round',
     targetId: String(insert.meta.last_row_id),
     details: payload
@@ -3115,56 +3197,80 @@ async function upsertRound(request, env, user) {
 
 async function upsertFormField(request, env, user) {
   const payload = await parseJsonBody(request);
-  if (!payload.competitionId || !payload.fieldKey || !payload.label || !payload.fieldType) {
+  const competitionId = Number(payload.competitionId);
+  const fieldKey = String(payload.fieldKey || '').trim();
+  const label = String(payload.label || '').trim();
+  const fieldType = String(payload.fieldType || '').trim();
+
+  if (!competitionId || !fieldKey || !label || !fieldType) {
     return jsonResponse({ error: 'competitionId, fieldKey, label, fieldType are required' }, 400);
   }
 
-  if (!ALLOWED_FIELD_TYPES.has(payload.fieldType)) {
+  if (!ALLOWED_FIELD_TYPES.has(fieldType)) {
     return jsonResponse({ error: `fieldType must be one of: ${[...ALLOWED_FIELD_TYPES].join(', ')}` }, 400);
+  }
+
+  const competition = await env.DB.prepare('SELECT id FROM competitions WHERE id = ?').bind(competitionId).first();
+  if (!competition) return jsonResponse({ error: 'Competition not found' }, 404);
+
+  if (payload.id) {
+    const existingField = await env.DB.prepare('SELECT id FROM form_fields WHERE id = ?').bind(payload.id).first();
+    if (!existingField) return jsonResponse({ error: 'Form field not found' }, 404);
   }
 
   const optionsJson = payload.options ? JSON.stringify(payload.options) : null;
 
   if (payload.id) {
-    await env.DB.prepare(
-      `UPDATE form_fields
-       SET competition_id = ?, field_key = ?, label = ?, field_type = ?, options_json = ?,
-           is_required = ?, is_visible = ?, display_order = ?, help_text = ?
-       WHERE id = ?`
+    try {
+      await env.DB.prepare(
+        `UPDATE form_fields
+         SET competition_id = ?, field_key = ?, label = ?, field_type = ?, options_json = ?,
+             is_required = ?, is_visible = ?, display_order = ?, help_text = ?
+         WHERE id = ?`
+      ).bind(
+        competitionId,
+        fieldKey,
+        label,
+        fieldType,
+        optionsJson,
+        payload.isRequired ? 1 : 0,
+        payload.isVisible === false ? 0 : 1,
+        payload.displayOrder || 0,
+        payload.helpText || null,
+        payload.id
+      ).run();
+    } catch (error) {
+      if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Competition not found' }, 404);
+      throw error;
+    }
+    return jsonResponse({ message: 'Form field updated', formFieldId: payload.id });
+  }
+
+  let insert;
+  try {
+    insert = await env.DB.prepare(
+      `INSERT INTO form_fields (competition_id, field_key, label, field_type, options_json, is_required, is_visible, display_order, help_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
-      payload.competitionId,
-      payload.fieldKey,
-      payload.label,
-      payload.fieldType,
+      competitionId,
+      fieldKey,
+      label,
+      fieldType,
       optionsJson,
       payload.isRequired ? 1 : 0,
       payload.isVisible === false ? 0 : 1,
       payload.displayOrder || 0,
-      payload.helpText || null,
-      payload.id
+      payload.helpText || null
     ).run();
-    return jsonResponse({ message: 'Form field updated', formFieldId: payload.id });
+  } catch (error) {
+    if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Competition not found' }, 404);
+    throw error;
   }
-
-  const insert = await env.DB.prepare(
-    `INSERT INTO form_fields (competition_id, field_key, label, field_type, options_json, is_required, is_visible, display_order, help_text)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    payload.competitionId,
-    payload.fieldKey,
-    payload.label,
-    payload.fieldType,
-    optionsJson,
-    payload.isRequired ? 1 : 0,
-    payload.isVisible === false ? 0 : 1,
-    payload.displayOrder || 0,
-    payload.helpText || null
-  ).run();
 
   await logAudit(env, {
     actorUserId: user.id,
     action: 'form_field_created',
-    competitionId: payload.competitionId,
+    competitionId,
     targetType: 'form_field',
     targetId: String(insert.meta.last_row_id),
     details: payload
@@ -3365,28 +3471,39 @@ async function updateEventSettings(request, env, user) {
   const payload = await parseJsonBody(request);
   if (!payload.eventId) return jsonResponse({ error: 'eventId is required' }, 400);
 
-  await env.DB.prepare(
-    `UPDATE events
-     SET moderation_enabled = COALESCE(?, moderation_enabled),
-         branding_json = COALESCE(?, branding_json),
-         navigation_json = COALESCE(?, navigation_json),
-         home_content_json = COALESCE(?, home_content_json),
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).bind(
-    payload.moderationEnabled === undefined ? null : (payload.moderationEnabled ? 1 : 0),
-    payload.branding ? JSON.stringify(payload.branding) : null,
-    payload.navigation ? JSON.stringify(payload.navigation) : null,
-    payload.homeContent ? JSON.stringify(payload.homeContent) : null,
-    payload.eventId
-  ).run();
+  const eventId = Number(payload.eventId);
+  if (!eventId) return jsonResponse({ error: 'eventId is required' }, 400);
+
+  const event = await env.DB.prepare('SELECT id FROM events WHERE id = ?').bind(eventId).first();
+  if (!event) return jsonResponse({ error: 'Event not found' }, 404);
+
+  try {
+    await env.DB.prepare(
+      `UPDATE events
+       SET moderation_enabled = COALESCE(?, moderation_enabled),
+           branding_json = COALESCE(?, branding_json),
+           navigation_json = COALESCE(?, navigation_json),
+           home_content_json = COALESCE(?, home_content_json),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).bind(
+      payload.moderationEnabled === undefined ? null : (payload.moderationEnabled ? 1 : 0),
+      payload.branding ? JSON.stringify(payload.branding) : null,
+      payload.navigation ? JSON.stringify(payload.navigation) : null,
+      payload.homeContent ? JSON.stringify(payload.homeContent) : null,
+      eventId
+    ).run();
+  } catch (error) {
+    if (isDbConstraintError(error, 'foreign key')) return jsonResponse({ error: 'Event not found' }, 404);
+    throw error;
+  }
 
   await logAudit(env, {
     actorUserId: user.id,
     action: 'event_settings_changed',
-    eventId: payload.eventId,
+    eventId,
     targetType: 'event',
-    targetId: String(payload.eventId),
+    targetId: String(eventId),
     details: payload
   });
 
@@ -3816,6 +3933,12 @@ function safeParse(value) {
   } catch {
     return value;
   }
+}
+
+function isDbConstraintError(error, token = '') {
+  const message = String(error?.message || '').toLowerCase();
+  if (!message.includes('constraint')) return false;
+  return token ? message.includes(String(token).toLowerCase()) : true;
 }
 
 function sanitizeUser(user) {
