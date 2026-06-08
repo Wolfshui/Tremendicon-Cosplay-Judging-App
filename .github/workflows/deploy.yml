@@ -29,9 +29,19 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Prepare production config
+        run: |
+          node -e "
+            const fs = require('fs');
+            let config = fs.readFileSync('wrangler.toml', 'utf-8');
+            config = config.replace(/database_id = \"[^\"]*\"/, \`database_id = \"\${process.env.CLOUDFLARE_D1_DATABASE_ID}\"\`);
+            fs.writeFileSync('wrangler.toml', config);
+          "
+        env:
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+
       - name: Deploy Worker
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
