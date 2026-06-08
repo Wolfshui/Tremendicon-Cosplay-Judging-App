@@ -31,29 +31,14 @@ jobs:
 
       - name: Verify and prepare config
         run: |
-          echo "=== Before substitution ==="
-          grep "database_id" wrangler.toml
-          
           if [ -z "$CLOUDFLARE_D1_DATABASE_ID" ]; then
             echo "ERROR: CLOUDFLARE_D1_DATABASE_ID secret is not set!"
             exit 1
           fi
-          
-          echo "Secret length: ${#CLOUDFLARE_D1_DATABASE_ID}"
-          
-          # Use sed to replace the database_id with proper escaping
+
           sed -i "s|database_id = \"[^\"]*\"|database_id = \"${CLOUDFLARE_D1_DATABASE_ID}\"|g" wrangler.toml
-          
-          echo "=== After substitution ==="
-          grep "database_id" wrangler.toml
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
-
-      - name: Deploy Worker
-        run: npx wrangler deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy Worker
         run: npx wrangler deploy
