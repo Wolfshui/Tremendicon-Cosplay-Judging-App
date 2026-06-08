@@ -1,0 +1,1 @@
+ALTER TABLE users ADD COLUMN password_reset_required INTEGER NOT NULL DEFAULT 0;

@@ -35,16 +35,23 @@ async function routeRequest(request, env) {
   if (request.method === 'GET' && pathname === '/') return renderHome(env);
   if (request.method === 'GET' && pathname === '/login') return renderLoginPage();
   if (request.method === 'GET' && pathname === '/register') return renderRegisterPage();
+  if (request.method === 'GET' && pathname === '/password-reset-required') {
+    const user = await requireAuth(request, env, { allowPasswordResetPending: true });
+    return renderPasswordResetPage(user);
+  }
   if (request.method === 'GET' && pathname === '/admin') {
-    const user = await requireRole(request, env, ['admin']);
+    const user = await requireRole(request, env, ['admin'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
     return renderRolePortal('admin', user);
   }
   if (request.method === 'GET' && pathname === '/judge') {
-    const user = await requireRole(request, env, ['judge', 'admin']);
+    const user = await requireRole(request, env, ['judge', 'admin'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
     return renderRolePortal('judge', user);
   }
   if (request.method === 'GET' && pathname === '/contestant') {
-    const user = await requireRole(request, env, ['contestant']);
+    const user = await requireRole(request, env, ['contestant'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
     return renderRolePortal('contestant', user);
   }
   if (request.method === 'GET' && matchPath(pathname, '/events/:eventSlug')) {
@@ -60,9 +67,10 @@ async function routeRequest(request, env) {
   if (request.method === 'POST' && pathname === '/auth/login') return login(request, env);
   if (request.method === 'POST' && pathname === '/auth/logout') return logout(request, env);
   if (request.method === 'POST' && pathname === '/auth/password-reset') return requestPasswordReset(request, env);
+  if (request.method === 'POST' && pathname === '/auth/change-password') return changePassword(request, env);
 
   if (request.method === 'GET' && pathname === '/me') {
-    const user = await requireAuth(request, env);
+    const user = await requireAuth(request, env, { allowPasswordResetPending: true });
     return jsonResponse({ user });
   }
 
@@ -630,6 +638,12 @@ function renderLoginPage() {
           return;
         }
 
+        if (meBody.user.requiresPasswordReset) {
+          showMessage('Password reset is required. Redirecting...', 'ok');
+          window.location.assign('/password-reset-required');
+          return;
+        }
+
         const role = meBody.user.role;
         if (role === 'admin') {
           showMessage('Welcome admin. Redirecting...', 'ok');
@@ -653,6 +667,138 @@ function renderLoginPage() {
       } finally {
         submit.disabled = false;
       }
+    });
+  </script>
+</body>
+</html>`, {
+    headers: { 'content-type': 'text/html; charset=utf-8' }
+  });
+}
+
+function renderPasswordResetPage(user) {
+  return new Response(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Password Reset Required</title>
+  <style>${getNeonThemeStyles()}</style>
+</head>
+<body>
+  <main class="neon-shell center-shell">
+    <div class="chrome-logo" style="font-size: clamp(1.1rem, 4vw, 1.7rem);">Security Checkpoint</div>
+    <h1 class="neon-title">Password Update Required</h1>
+    <p class="neon-subtitle">Welcome ${escapeHtml(user.displayName || user.email)}. You must set a new password before accessing portal pages.</p>
+    <hr class="neon-divider" />
+    <section class="glass-panel">
+      <form id="reset-form">
+        <label for="currentPassword">Current / Temporary Password</label>
+        <input id="currentPassword" name="currentPassword" type="password" autocomplete="current-password" required />
+
+        <label for="newPassword">New Password (min 8 chars)</label>
+        <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="8" required />
+
+        <label for="confirmPassword">Confirm New Password</label>
+        <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+
+        <button id="submit" type="submit">Update Password</button>
+        <div id="message" class="flash" aria-live="polite"></div>
+      </form>
+      <div class="row">
+        <button id="logout" type="button">Log Out</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('reset-form');
+    const submit = document.getElementById('submit');
+    const message = document.getElementById('message');
+    const logout = document.getElementById('logout');
+
+    const showMessage = (text, kind) => {
+      message.textContent = text;
+      message.className = ('flash ' + (kind || '')).trim();
+    };
+
+    const routeForRole = (role) => {
+      if (role === 'admin') return '/admin';
+      if (role === 'judge') return '/judge';
+      return '/contestant';
+    };
+
+    const ensureResetIsNeeded = async () => {
+      const meRes = await fetch('/me');
+      const meBody = await meRes.json();
+      if (!meRes.ok || !meBody.user) {
+        window.location.assign('/login');
+        return null;
+      }
+      if (!meBody.user.requiresPasswordReset) {
+        window.location.assign(routeForRole(meBody.user.role));
+        return null;
+      }
+      return meBody.user;
+    };
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const currentPassword = String(data.get('currentPassword') || '');
+      const newPassword = String(data.get('newPassword') || '');
+      const confirmPassword = String(data.get('confirmPassword') || '');
+
+      if (!currentPassword || !newPassword || !confirmPassword) {
+        showMessage('All fields are required.', 'error');
+        return;
+      }
+      if (newPassword.length < 8) {
+        showMessage('New password must be at least 8 characters.', 'error');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        showMessage('New password and confirmation do not match.', 'error');
+        return;
+      }
+
+      submit.disabled = true;
+      showMessage('Updating password...', '');
+
+      try {
+        const response = await fetch('/auth/change-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const body = await response.json();
+        if (!response.ok) {
+          showMessage(body.error || 'Password update failed.', 'error');
+          return;
+        }
+
+        const meRes = await fetch('/me');
+        const meBody = await meRes.json();
+        if (!meRes.ok || !meBody.user) {
+          showMessage('Password changed but user session could not be verified.', 'error');
+          return;
+        }
+
+        showMessage('Password updated. Redirecting...', 'ok');
+        setTimeout(() => window.location.assign(routeForRole(meBody.user.role)), 700);
+      } catch {
+        showMessage('Network error while updating password.', 'error');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    logout.addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.assign('/login');
+    });
+
+    ensureResetIsNeeded().catch(() => {
+      window.location.assign('/login');
     });
   </script>
 </body>
@@ -1400,7 +1546,9 @@ async function login(request, env) {
   const password = payload.password;
   if (!email || !password) return jsonResponse({ error: 'email and password are required' }, 400);
 
-  const user = await env.DB.prepare('SELECT id, email, password_salt, password_hash, role, display_name, is_active FROM users WHERE email = ?').bind(email).first();
+  const user = await env.DB.prepare(
+    'SELECT id, email, password_salt, password_hash, role, display_name, is_active, password_reset_required FROM users WHERE email = ?'
+  ).bind(email).first();
   if (!user || !user.is_active) return jsonResponse({ error: 'Invalid credentials' }, 401);
 
   const passwordHash = await hashPassword(password, user.password_salt);
@@ -1412,6 +1560,39 @@ async function login(request, env) {
     200,
     { 'set-cookie': buildSessionCookie(sessionToken) }
   );
+}
+
+async function changePassword(request, env) {
+  const user = await requireAuth(request, env, { allowPasswordResetPending: true });
+  const payload = await parseJsonBody(request);
+  const currentPassword = String(payload.currentPassword || '');
+  const newPassword = String(payload.newPassword || '');
+
+  if (!currentPassword || !newPassword || newPassword.length < 8) {
+    return jsonResponse({ error: 'currentPassword and newPassword (min 8) are required' }, 400);
+  }
+
+  const row = await env.DB.prepare('SELECT id, password_salt, password_hash FROM users WHERE id = ?').bind(user.id).first();
+  if (!row) return jsonResponse({ error: 'User not found' }, 404);
+
+  const currentHash = await hashPassword(currentPassword, row.password_salt);
+  if (currentHash !== row.password_hash) return jsonResponse({ error: 'Current password is incorrect' }, 401);
+
+  const passwordSalt = generatePasswordSalt();
+  const passwordHash = await hashPassword(newPassword, passwordSalt);
+  await env.DB.prepare(
+    'UPDATE users SET password_salt = ?, password_hash = ?, password_reset_required = 0 WHERE id = ?'
+  ).bind(passwordSalt, passwordHash, user.id).run();
+
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: 'password_changed',
+    targetType: 'user',
+    targetId: String(user.id),
+    details: { via: 'forced_reset' }
+  });
+
+  return jsonResponse({ message: 'Password updated' });
 }
 
 async function logout(request, env) {
@@ -2396,23 +2577,25 @@ async function exportSchedule(url, env) {
   return csvResponse(buildCsv(rows.results || []), 'schedule.csv');
 }
 
-async function requireAuth(request, env) {
+async function requireAuth(request, env, options = {}) {
+  const allowPasswordResetPending = Boolean(options.allowPasswordResetPending);
   const token = getSessionTokenFromRequest(request);
   if (!token) throw new HttpError(401, 'Authentication required');
 
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.role, u.display_name, u.is_active
+    `SELECT u.id, u.email, u.role, u.display_name, u.is_active, u.password_reset_required
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token = ? AND s.expires_at > datetime('now')`
   ).bind(token).first();
 
   if (!row || !row.is_active) throw new HttpError(401, 'Invalid or expired session');
+  if (row.password_reset_required && !allowPasswordResetPending) throw new HttpError(403, 'Password reset required');
   return sanitizeUser(row);
 }
 
-async function requireRole(request, env, allowedRoles) {
-  const user = await requireAuth(request, env);
+async function requireRole(request, env, allowedRoles, options = {}) {
+  const user = await requireAuth(request, env, options);
   if (!allowedRoles.includes(user.role)) throw new HttpError(403, 'Insufficient role');
   return user;
 }
@@ -2628,7 +2811,8 @@ function sanitizeUser(user) {
     id: user.id,
     email: user.email,
     role: user.role,
-    displayName: user.display_name
+    displayName: user.display_name,
+    requiresPasswordReset: Boolean(user.password_reset_required)
   };
 }
 
