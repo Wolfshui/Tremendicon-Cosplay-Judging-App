@@ -1,5 +1,5 @@
 const SESSION_DAYS = 7;
-const PASSWORD_ITERATIONS = 120000;
+const PASSWORD_ITERATIONS = 100000;
 
 const ALLOWED_FIELD_TYPES = new Set([
   'short_text',
@@ -33,6 +33,16 @@ async function routeRequest(request, env) {
   const { pathname } = url;
 
   if (request.method === 'GET' && pathname === '/') return renderHome(env);
+  if (request.method === 'GET' && pathname === '/login') return renderLoginPage();
+  if (request.method === 'GET' && pathname === '/register') return renderRegisterPage();
+  if (request.method === 'GET' && pathname === '/admin') {
+    const user = await requireRole(request, env, ['admin']);
+    return renderRolePortal('admin', user);
+  }
+  if (request.method === 'GET' && pathname === '/judge') {
+    const user = await requireRole(request, env, ['judge', 'admin']);
+    return renderRolePortal('judge', user);
+  }
   if (request.method === 'GET' && matchPath(pathname, '/events/:eventSlug')) {
     const { eventSlug } = extractPathParams(pathname, '/events/:eventSlug');
     return getPublicEventPage(env, eventSlug);
@@ -170,6 +180,333 @@ async function adminRoute(request, env, user, pathname, url) {
   return jsonResponse({ error: 'Not found' }, 404);
 }
 
+function getNeonThemeStyles() {
+  return `
+    :root {
+      --space-black: #050505;
+      --midnight-navy: #0a1128;
+      --hot-pink: #ff00ff;
+      --electric-blue: #00ffff;
+      --neon-purple: #bf00ff;
+      --chrome-light: #f6fbff;
+      --chrome-mid: #7fa4c8;
+      --steel-blue: #34577d;
+      --ink: #eaf3ff;
+      --muted: #c4d1e6;
+      --good: #7bffba;
+      --bad: #ff7aa4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 700px at 20% 10%, rgba(191, 0, 255, 0.22), transparent 55%),
+        radial-gradient(900px 600px at 80% 20%, rgba(0, 255, 255, 0.18), transparent 58%),
+        radial-gradient(1000px 800px at 50% 85%, rgba(255, 0, 255, 0.18), transparent 55%),
+        radial-gradient(2px 2px at 12% 8%, rgba(255, 255, 255, 0.95), transparent 60%),
+        radial-gradient(1.4px 1.4px at 42% 28%, rgba(255, 255, 255, 0.9), transparent 60%),
+        radial-gradient(1.8px 1.8px at 76% 62%, rgba(255, 255, 255, 0.95), transparent 62%),
+        radial-gradient(1.6px 1.6px at 85% 32%, rgba(255, 255, 255, 0.92), transparent 60%),
+        radial-gradient(1.2px 1.2px at 30% 78%, rgba(255, 255, 255, 0.85), transparent 58%),
+        linear-gradient(180deg, var(--space-black), var(--midnight-navy));
+      background-attachment: fixed;
+      padding: 18px;
+      overflow-x: hidden;
+      position: relative;
+    }
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: -20% -10%;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.45;
+      filter: blur(8px);
+    }
+    body::before {
+      background:
+        radial-gradient(40% 20% at 30% 65%, rgba(255, 0, 255, 0.45), transparent 68%),
+        radial-gradient(55% 18% at 70% 35%, rgba(191, 0, 255, 0.42), transparent 70%);
+      transform: rotate(-6deg);
+    }
+    body::after {
+      background:
+        conic-gradient(from 190deg at 22% 45%, transparent 0deg, rgba(255, 0, 255, 0.22) 62deg, transparent 120deg),
+        conic-gradient(from 20deg at 74% 58%, transparent 0deg, rgba(191, 0, 255, 0.18) 60deg, transparent 130deg);
+      transform: rotate(8deg);
+      opacity: 0.35;
+    }
+    .neon-shell {
+      position: relative;
+      z-index: 1;
+      margin: 0 auto;
+      width: 100%;
+      max-width: 1120px;
+      background: linear-gradient(155deg, rgba(15, 20, 45, 0.6), rgba(5, 7, 20, 0.6));
+      border-radius: 18px;
+      border: 1px solid rgba(0, 255, 255, 0.55);
+      box-shadow:
+        0 0 0 1px rgba(255, 0, 255, 0.22) inset,
+        0 0 22px rgba(0, 255, 255, 0.28),
+        0 18px 45px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(18px) saturate(140%);
+      -webkit-backdrop-filter: blur(18px) saturate(140%);
+      padding: 22px;
+    }
+    .chrome-logo {
+      margin: 0;
+      line-height: 1;
+      position: relative;
+      display: inline-block;
+      color: transparent;
+      background: linear-gradient(180deg, #f7feff 0%, #b8c7d6 35%, #dce8f3 58%, #7f97af 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-weight: 900;
+      text-shadow: 0 0 20px rgba(0, 255, 255, 0.25);
+    }
+    .chrome-logo::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 49%;
+      height: 18%;
+      background: linear-gradient(90deg, rgba(255, 0, 255, 0.82), rgba(191, 0, 255, 0.92));
+      mix-blend-mode: screen;
+      opacity: 0.92;
+      pointer-events: none;
+    }
+    .neon-title {
+      margin: 8px 0;
+      font-size: clamp(1.5rem, 3.4vw, 2.05rem);
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      color: #f4e7ff;
+      text-shadow:
+        0 0 6px rgba(255, 255, 255, 0.6),
+        0 0 18px rgba(191, 0, 255, 0.88),
+        0 0 38px rgba(191, 0, 255, 0.45);
+    }
+    .neon-subtitle {
+      margin: 0;
+      color: var(--muted);
+      max-width: 70ch;
+    }
+    .neon-divider {
+      height: 1px;
+      margin: 16px 0 18px;
+      border: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95) 45%, rgba(255, 0, 255, 0.85) 53%, transparent);
+      box-shadow: 0 0 14px rgba(255, 0, 255, 0.72);
+    }
+    .glass-panel {
+      position: relative;
+      background: linear-gradient(145deg, rgba(12, 16, 36, 0.6), rgba(5, 7, 18, 0.6));
+      border: 1px solid rgba(0, 255, 255, 0.42);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: inset 0 0 0 1px rgba(255, 0, 255, 0.23), 0 0 16px rgba(0, 255, 255, 0.16);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .starburst {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      clip-path: polygon(50% 0%, 62% 28%, 92% 18%, 75% 45%, 100% 50%, 75% 55%, 92% 82%, 62% 72%, 50% 100%, 38% 72%, 8% 82%, 25% 55%, 0% 50%, 25% 45%, 8% 18%, 38% 28%);
+      background: linear-gradient(180deg, #b3dcff, #2c5f92);
+      color: white;
+      font-size: 0.75rem;
+      box-shadow: 0 0 12px rgba(0, 255, 255, 0.45);
+      margin-left: 8px;
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+    }
+    .grid.two {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .grid.three {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    label {
+      display: block;
+      margin: 11px 0 6px;
+      font-weight: 700;
+      color: #d8eeff;
+    }
+    input {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 255, 255, 0.45);
+      color: #f2f8ff;
+      background: rgba(8, 14, 33, 0.7);
+      padding: 11px 12px;
+      font: inherit;
+      outline: 0;
+      box-shadow: inset 0 0 14px rgba(0, 255, 255, 0.08);
+    }
+    input:focus {
+      border-color: rgba(255, 0, 255, 0.86);
+      box-shadow: 0 0 0 1px rgba(255, 0, 255, 0.45), 0 0 15px rgba(191, 0, 255, 0.42);
+    }
+    button,
+    .button-link {
+      border-radius: 11px;
+      border: 1px solid rgba(0, 255, 255, 0.5);
+      color: #ecf6ff;
+      background:
+        linear-gradient(175deg, rgba(244, 252, 255, 0.35), rgba(44, 95, 146, 0.48) 38%, rgba(17, 40, 74, 0.8) 85%),
+        linear-gradient(90deg, rgba(0, 255, 255, 0.08), rgba(191, 0, 255, 0.1));
+      box-shadow:
+        inset 0 1px 2px rgba(255, 255, 255, 0.55),
+        inset 0 -8px 16px rgba(0, 20, 48, 0.45),
+        0 0 18px rgba(0, 255, 255, 0.25);
+      font: inherit;
+      font-weight: 700;
+      padding: 10px 14px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+      position: relative;
+      transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+    }
+    button::before,
+    .button-link::before {
+      content: "";
+      position: absolute;
+      inset: 2px 8px auto;
+      height: 35%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
+      pointer-events: none;
+    }
+    button:hover,
+    .button-link:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255, 0, 255, 0.75);
+      box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.62), 0 0 20px rgba(255, 0, 255, 0.38);
+    }
+    button:disabled {
+      cursor: wait;
+      opacity: 0.8;
+    }
+    .error { color: var(--bad); }
+    .ok { color: var(--good); }
+    .row {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .cards {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    }
+    .card {
+      border-radius: 12px;
+      border: 1px solid rgba(255, 0, 255, 0.38);
+      padding: 12px;
+      background: linear-gradient(155deg, rgba(11, 19, 46, 0.72), rgba(14, 9, 32, 0.72));
+      box-shadow: 0 0 12px rgba(191, 0, 255, 0.2);
+    }
+    .card h3 {
+      margin: 0;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #99f0ff;
+    }
+    .card p {
+      margin: 8px 0 0;
+      font-size: 1.26rem;
+      color: #fff;
+      font-weight: 800;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: rgba(4, 10, 25, 0.6);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    th,
+    td {
+      border-bottom: 1px solid rgba(0, 255, 255, 0.18);
+      text-align: left;
+      padding: 10px;
+      font-size: 0.9rem;
+      white-space: nowrap;
+    }
+    th {
+      background: linear-gradient(90deg, rgba(0, 255, 255, 0.18), rgba(191, 0, 255, 0.2));
+      color: #f6f4ff;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      font-size: 0.76rem;
+    }
+    tr:hover td {
+      background: rgba(255, 0, 255, 0.08);
+    }
+    .flash {
+      min-height: 18px;
+      margin: 8px 0 0;
+      font-size: 0.92rem;
+      color: #bdf6ff;
+    }
+    .flash.error {
+      color: var(--bad);
+    }
+    .center-shell {
+      max-width: 520px;
+    }
+    .event-list {
+      display: grid;
+      gap: 10px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+    .event-list li {
+      border-radius: 12px;
+      border: 1px solid rgba(0, 255, 255, 0.3);
+      background: rgba(9, 16, 38, 0.55);
+      padding: 11px;
+      box-shadow: inset 0 0 12px rgba(0, 255, 255, 0.08);
+    }
+    a {
+      color: #bdf6ff;
+    }
+    @media (max-width: 760px) {
+      body { padding: 10px; }
+      .neon-shell { padding: 14px; }
+      th,
+      td { font-size: 0.82rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  `;
+}
+
 async function renderHome(env) {
   const events = await env.DB.prepare(
     `SELECT e.id, e.name, e.slug, e.description,
@@ -180,17 +517,677 @@ async function renderHome(env) {
   ).all();
 
   const items = (events.results || []).map((event) =>
-    `<li><a href="/events/${escapeHtml(event.slug)}">${escapeHtml(event.name)}</a> - ${escapeHtml(event.description || '')} (${event.active_competitions} active competitions)</li>`
+    `<li>
+      <strong><a href="/events/${escapeHtml(event.slug)}">${escapeHtml(event.name)}</a></strong><br />
+      <span>${escapeHtml(event.description || 'No event description yet.')}</span><br />
+      <small>${event.active_competitions} active competitions</small>
+    </li>`
   ).join('');
 
   return new Response(`<!doctype html>
-<html><head><meta charset="utf-8" /><title>Tremendicon Cosplay Judging MVP</title></head>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tremendicon Cosplay Judging MVP</title>
+  <style>${getNeonThemeStyles()}</style>
+</head>
 <body>
-  <h1>Tremendicon Cosplay Judging MVP</h1>
-  <p>Public event directory with role-based API endpoints for admin, judges, and contestants.</p>
-  <h2>Events</h2>
-  <ul>${items || '<li>No public events yet.</li>'}</ul>
-</body></html>`, {
+  <main class="neon-shell">
+    <div class="chrome-logo" style="font-size: clamp(1.4rem, 4.4vw, 2.4rem);">Tremendicon Mission Control</div>
+    <h1 class="neon-title">Public Event Directory</h1>
+    <p class="neon-subtitle">A holographic gateway to events, competitions, and role-based portals for judges and administrators.</p>
+    <hr class="neon-divider" />
+
+    <section class="glass-panel">
+      <p><a class="button-link" href="/login">Admin and Judge Login</a></p>
+      <h2 class="neon-title" style="font-size: 1.1rem; margin-top: 6px;">Active Events</h2>
+      <ul class="event-list">${items || '<li>No public events yet.</li>'}</ul>
+    </section>
+  </main>
+</body>
+</html>`, {
+    headers: { 'content-type': 'text/html; charset=utf-8' }
+  });
+}
+
+function renderLoginPage() {
+  return new Response(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tremendicon Login</title>
+  <style>${getNeonThemeStyles()}</style>
+</head>
+<body>
+  <main class="neon-shell center-shell">
+    <div class="chrome-logo" style="font-size: clamp(1.1rem, 4vw, 1.7rem);">Tremendicon Access</div>
+    <h1 class="neon-title">Admin and Judge Login</h1>
+    <p class="neon-subtitle">Authenticate to access your mission-control portal.</p>
+    <hr class="neon-divider" />
+    <section class="glass-panel">
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <button id="submit" type="submit">Sign In</button>
+        <div id="message" class="flash" aria-live="polite"></div>
+      </form>
+      <div class="row">
+        <a class="button-link" href="/register">Register New Account</a>
+      </div>
+      <p class="neon-subtitle" style="font-size: 0.88rem; margin-top: 12px;">Demo: admin@tremendicon.test / admin123, judge@tremendicon.test / judge123</p>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const submit = document.getElementById('submit');
+    const message = document.getElementById('message');
+
+    const showMessage = (text, kind) => {
+      message.textContent = text;
+      message.className = ('flash ' + (kind || '')).trim();
+    };
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const email = String(data.get('email') || '').trim();
+      const password = String(data.get('password') || '');
+      if (!email || !password) {
+        showMessage('Email and password are required.', 'error');
+        return;
+      }
+
+      submit.disabled = true;
+      showMessage('Signing in...', '');
+
+      try {
+        const loginRes = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const loginBody = await loginRes.json();
+        if (!loginRes.ok) {
+          showMessage(loginBody.error || 'Login failed.', 'error');
+          return;
+        }
+
+        const meRes = await fetch('/me');
+        const meBody = await meRes.json();
+        if (!meRes.ok || !meBody.user) {
+          showMessage('Login succeeded but user info could not be loaded.', 'error');
+          return;
+        }
+
+        const role = meBody.user.role;
+        if (role === 'admin') {
+          showMessage('Welcome admin. Redirecting...', 'ok');
+          window.location.assign('/admin');
+          return;
+        }
+        if (role === 'judge') {
+          showMessage('Welcome judge. Redirecting...', 'ok');
+          window.location.assign('/judge');
+          return;
+        }
+
+        showMessage('This login is for admin/judge accounts only.', 'error');
+      } catch {
+        showMessage('Network error while signing in.', 'error');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>`, {
+    headers: { 'content-type': 'text/html; charset=utf-8' }
+  });
+}
+
+function renderRegisterPage() {
+  return new Response(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tremendicon Register</title>
+  <style>${getNeonThemeStyles()}</style>
+</head>
+<body>
+  <main class="neon-shell center-shell">
+    <div class="chrome-logo" style="font-size: clamp(1.1rem, 4vw, 1.7rem);">Contestant Creation Console</div>
+    <h1 class="neon-title">Create Contestant Account</h1>
+    <p class="neon-subtitle">Register your identity beacon, then return to login for admin or judge portals.</p>
+    <hr class="neon-divider" />
+    <section class="glass-panel">
+      <form id="register-form">
+        <label for="displayName">Display Name</label>
+        <input id="displayName" name="displayName" type="text" required />
+
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required />
+
+        <label for="password">Password (min 8 chars)</label>
+        <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+
+        <button id="submit" type="submit">Register</button>
+        <div id="message" class="flash" aria-live="polite"></div>
+      </form>
+      <div class="row">
+        <a class="button-link" href="/login">Back to Login</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('register-form');
+    const submit = document.getElementById('submit');
+    const message = document.getElementById('message');
+
+    const showMessage = (text, kind) => {
+      message.textContent = text;
+      message.className = ('flash ' + (kind || '')).trim();
+    };
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const displayName = String(data.get('displayName') || '').trim();
+      const email = String(data.get('email') || '').trim();
+      const password = String(data.get('password') || '');
+
+      if (!displayName || !email || password.length < 8) {
+        showMessage('Display name, email, and a password of at least 8 characters are required.', 'error');
+        return;
+      }
+
+      submit.disabled = true;
+      showMessage('Creating account...', '');
+
+      try {
+        const response = await fetch('/auth/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ displayName, email, password })
+        });
+        const body = await response.json();
+
+        if (!response.ok) {
+          showMessage(body.error || 'Registration failed.', 'error');
+          return;
+        }
+
+        showMessage('Registration successful. Redirecting to login...', 'ok');
+        setTimeout(() => window.location.assign('/login'), 900);
+      } catch {
+        showMessage('Network error while creating account.', 'error');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>`, {
+    headers: { 'content-type': 'text/html; charset=utf-8' }
+  });
+}
+
+function renderRolePortal(portal, user) {
+  const title = portal === 'admin' ? 'Admin Portal' : 'Judge Portal';
+  const dashboard = portal === 'admin'
+    ? `
+    <section class="glass-panel controls">
+      <h2>Dashboard Filters</h2>
+      <div class="grid two">
+        <label>Event ID
+          <input id="event-id" type="number" min="1" value="1" />
+        </label>
+        <label>Competition ID
+          <input id="competition-id" type="number" min="1" value="1" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="load-dashboard" class="primary" type="button">Load Dashboard</button>
+        <button id="load-schedule" type="button">Load Schedule</button>
+      </div>
+      <div class="row">
+        <a id="csv-contestants" href="/admin/export/contestants.csv?competitionId=1">Contestants CSV</a>
+        <a id="csv-scores" href="/admin/export/scores.csv?competitionId=1">Scores CSV</a>
+        <a id="csv-schedule" href="/admin/export/schedule.csv?competitionId=1">Schedule CSV</a>
+      </div>
+      <p id="flash" class="flash"></p>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Totals</h2>
+      <div id="totals" class="cards"></div>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Round Performance</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Round</th>
+              <th>Contestants</th>
+              <th>Scores Submitted</th>
+              <th>Average Score</th>
+            </tr>
+          </thead>
+          <tbody id="round-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Judge Progress</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Judge</th>
+              <th>Assignments</th>
+              <th>Scores Submitted</th>
+            </tr>
+          </thead>
+          <tbody id="judge-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Schedule</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Slot</th>
+              <th>Round</th>
+              <th>Judging Time</th>
+              <th>Location</th>
+              <th>Reserved</th>
+              <th>Contestants</th>
+            </tr>
+          </thead>
+          <tbody id="schedule-table"></tbody>
+        </table>
+      </div>
+    </section>`
+    : `
+    <section class="glass-panel controls">
+      <h2>Judge Tools</h2>
+      <div class="grid three">
+        <label>Competition ID
+          <input id="competition-id" type="number" min="1" value="1" />
+        </label>
+        <label>Round ID (optional)
+          <input id="round-id" type="number" min="1" placeholder="Any" />
+        </label>
+        <label>Search
+          <input id="search-query" type="text" placeholder="Contestant number or name" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="search-contestants" class="primary" type="button">Search Contestants</button>
+        <button id="load-leaderboard" type="button">Load Leaderboard</button>
+        <button id="load-schedule" type="button">Load Schedule</button>
+      </div>
+      <p id="flash" class="flash"></p>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Contestant Search</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Entry ID</th>
+              <th>Contestant #</th>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Advancing</th>
+            </tr>
+          </thead>
+          <tbody id="contestant-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Leaderboard</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Contestant #</th>
+              <th>Name</th>
+              <th>Avg Score</th>
+              <th>Judges Scored</th>
+              <th>Advancing</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Schedule</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Slot</th>
+              <th>Round</th>
+              <th>Judging Time</th>
+              <th>Location</th>
+              <th>Contestant #</th>
+              <th>Name</th>
+            </tr>
+          </thead>
+          <tbody id="schedule-table"></tbody>
+        </table>
+      </div>
+    </section>`;
+
+  const script = portal === 'admin'
+    ? `
+    const flash = document.getElementById('flash');
+    const totalsNode = document.getElementById('totals');
+    const roundTable = document.getElementById('round-table');
+    const judgeTable = document.getElementById('judge-table');
+    const scheduleTable = document.getElementById('schedule-table');
+
+    const eventIdInput = document.getElementById('event-id');
+    const competitionIdInput = document.getElementById('competition-id');
+
+    const csvContestants = document.getElementById('csv-contestants');
+    const csvScores = document.getElementById('csv-scores');
+    const csvSchedule = document.getElementById('csv-schedule');
+
+    const showFlash = (text, isError) => {
+      flash.textContent = text;
+      flash.className = isError ? 'flash error' : 'flash';
+    };
+
+    const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+
+    const updateCsvLinks = () => {
+      const competitionId = Number(competitionIdInput.value) || 1;
+      csvContestants.href = '/admin/export/contestants.csv?competitionId=' + competitionId;
+      csvScores.href = '/admin/export/scores.csv?competitionId=' + competitionId;
+      csvSchedule.href = '/admin/export/schedule.csv?competitionId=' + competitionId;
+    };
+
+    const fetchJson = async (path) => {
+      const response = await fetch(path);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Request failed');
+      return body;
+    };
+
+    const renderTotals = (totals) => {
+      const cards = [
+        ['Total Entries', toText(totals.total_entries)],
+        ['No-Shows', toText(totals.no_show_count)],
+        ['Average Score', toText(totals.average_score)],
+        ['Judges Active', toText(totals.judges_active)]
+      ];
+      totalsNode.innerHTML = cards.map(([label, value]) => '<article class="card"><h3>' + safe(label) + '</h3><p>' + safe(value) + '</p></article>').join('');
+    };
+
+    const renderRoundTable = (rows) => {
+      if (!rows.length) {
+        roundTable.innerHTML = '<tr><td colspan="4">No round data.</td></tr>';
+        return;
+      }
+      roundTable.innerHTML = rows.map((row) => (
+        '<tr>' +
+        '<td>' + safe(toText(row.round_name)) + '</td>' +
+        '<td>' + safe(toText(row.contestants)) + '</td>' +
+        '<td>' + safe(toText(row.scores_submitted)) + '</td>' +
+        '<td>' + safe(toText(row.average_round_score)) + '</td>' +
+        '</tr>'
+      )).join('');
+    };
+
+    const renderJudgeTable = (rows) => {
+      if (!rows.length) {
+        judgeTable.innerHTML = '<tr><td colspan="3">No judge progress found.</td></tr>';
+        return;
+      }
+      judgeTable.innerHTML = rows.map((row) => (
+        '<tr>' +
+        '<td>' + safe(toText(row.display_name)) + '</td>' +
+        '<td>' + safe(toText(row.assignment_count)) + '</td>' +
+        '<td>' + safe(toText(row.score_count)) + '</td>' +
+        '</tr>'
+      )).join('');
+    };
+
+    const renderSchedule = (rows) => {
+      if (!rows.length) {
+        scheduleTable.innerHTML = '<tr><td colspan="6">No schedule slots found.</td></tr>';
+        return;
+      }
+      scheduleTable.innerHTML = rows.map((row) => (
+        '<tr>' +
+        '<td>' + safe(toText(row.slot_id)) + '</td>' +
+        '<td>' + safe(toText(row.round_id)) + '</td>' +
+        '<td>' + safe(toText(row.judging_time)) + '</td>' +
+        '<td>' + safe(toText(row.location)) + '</td>' +
+        '<td>' + safe(toText(row.reserved_count)) + '/' + safe(toText(row.capacity)) + '</td>' +
+        '<td>' + safe(toText(row.contestant_numbers)) + '</td>' +
+        '</tr>'
+      )).join('');
+    };
+
+    const loadDashboard = async () => {
+      try {
+        showFlash('Loading dashboard...');
+        const eventId = Number(eventIdInput.value) || 1;
+        const data = await fetchJson('/admin/dashboard?eventId=' + eventId);
+        renderTotals(data.totals || {});
+        renderRoundTable(data.perRound || []);
+        renderJudgeTable(data.judgeProgress || []);
+        showFlash('Dashboard loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    const loadSchedule = async () => {
+      try {
+        showFlash('Loading schedule...');
+        const competitionId = Number(competitionIdInput.value) || 1;
+        const data = await fetchJson('/admin/schedule?competitionId=' + competitionId);
+        renderSchedule(data.schedule || []);
+        showFlash('Schedule loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    competitionIdInput.addEventListener('input', updateCsvLinks);
+    document.getElementById('load-dashboard').addEventListener('click', loadDashboard);
+    document.getElementById('load-schedule').addEventListener('click', loadSchedule);
+
+    updateCsvLinks();
+    loadDashboard();
+    loadSchedule();`
+    : `
+    const flash = document.getElementById('flash');
+    const contestantTable = document.getElementById('contestant-table');
+    const leaderboardTable = document.getElementById('leaderboard-table');
+    const scheduleTable = document.getElementById('schedule-table');
+
+    const competitionIdInput = document.getElementById('competition-id');
+    const roundIdInput = document.getElementById('round-id');
+    const searchInput = document.getElementById('search-query');
+
+    const showFlash = (text, isError) => {
+      flash.textContent = text;
+      flash.className = isError ? 'flash error' : 'flash';
+    };
+
+    const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+
+    const fetchJson = async (path) => {
+      const response = await fetch(path);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Request failed');
+      return body;
+    };
+
+    const ids = () => {
+      const competitionId = Number(competitionIdInput.value) || 1;
+      const roundId = roundIdInput.value.trim() ? Number(roundIdInput.value) : null;
+      return { competitionId, roundId };
+    };
+
+    const renderContestants = (rows) => {
+      if (!rows.length) {
+        contestantTable.innerHTML = '<tr><td colspan="5">No contestants found.</td></tr>';
+        return;
+      }
+      contestantTable.innerHTML = rows.map((row) => (
+        '<tr>' +
+        '<td>' + safe(toText(row.entry_id)) + '</td>' +
+        '<td>' + safe(toText(row.contestant_number)) + '</td>' +
+        '<td>' + safe(toText(row.display_name)) + '</td>' +
+        '<td>' + safe(toText(row.status)) + '</td>' +
+        '<td>' + (row.is_advancing ? 'Yes' : 'No') + '</td>' +
+        '</tr>'
+      )).join('');
+    };
+
+    const renderLeaderboard = (rows) => {
+      if (!rows.length) {
+        leaderboardTable.innerHTML = '<tr><td colspan="6">No leaderboard data.</td></tr>';
+        return;
+      }
+      leaderboardTable.innerHTML = rows.map((row) => (
+        '<tr>' +
+        '<td>' + safe(toText(row.rank)) + '</td>' +
+        '<td>' + safe(toText(row.contestant_number)) + '</td>' +
+        '<td>' + safe(toText(row.contestant_name)) + '</td>' +
+        '<td>' + safe(toText(row.average_score)) + '</td>' +
+        '<td>' + safe(toText(row.judges_scored)) + '</td>' +
+        '<td>' + (row.is_advancing ? 'Yes' : 'No') + '</td>' +
+        '</tr>'
+      )).join('');
+    };
+
+    const renderSchedule = (rows) => {
+      if (!rows.length) {
+        scheduleTable.innerHTML = '<tr><td colspan="6">No schedule entries.</td></tr>';
+        return;
+      }
+      scheduleTable.innerHTML = rows.map((row) => (
+        '<tr>' +
+        '<td>' + safe(toText(row.slot_id)) + '</td>' +
+        '<td>' + safe(toText(row.round_id)) + '</td>' +
+        '<td>' + safe(toText(row.judging_time)) + '</td>' +
+        '<td>' + safe(toText(row.location)) + '</td>' +
+        '<td>' + safe(toText(row.contestant_number)) + '</td>' +
+        '<td>' + safe(toText(row.contestant_name)) + '</td>' +
+        '</tr>'
+      )).join('');
+    };
+
+    const searchContestants = async () => {
+      try {
+        showFlash('Searching contestants...');
+        const { competitionId, roundId } = ids();
+        const q = encodeURIComponent(searchInput.value.trim());
+        const roundQuery = roundId ? '&roundId=' + roundId : '';
+        const data = await fetchJson('/judge/contestants?competitionId=' + competitionId + roundQuery + '&q=' + q);
+        renderContestants(data.contestants || []);
+        showFlash('Contestants loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    const loadLeaderboard = async () => {
+      try {
+        showFlash('Loading leaderboard...');
+        const { competitionId, roundId } = ids();
+        const roundQuery = roundId ? '&roundId=' + roundId : '';
+        const data = await fetchJson('/judge/leaderboard?competitionId=' + competitionId + roundQuery);
+        renderLeaderboard(data.leaderboard || []);
+        showFlash('Leaderboard loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    const loadSchedule = async () => {
+      try {
+        showFlash('Loading schedule...');
+        const { competitionId } = ids();
+        const data = await fetchJson('/judge/schedule?competitionId=' + competitionId);
+        renderSchedule(data.schedule || []);
+        showFlash('Schedule loaded.');
+      } catch (error) {
+        showFlash(error.message, true);
+      }
+    };
+
+    document.getElementById('search-contestants').addEventListener('click', searchContestants);
+    document.getElementById('load-leaderboard').addEventListener('click', loadLeaderboard);
+    document.getElementById('load-schedule').addEventListener('click', loadSchedule);
+
+    searchContestants();
+    loadLeaderboard();
+    loadSchedule();`;
+
+  return new Response(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>${getNeonThemeStyles()}</style>
+</head>
+<body>
+  <main class="neon-shell">
+    <header>
+      <div>
+        <div class="chrome-logo" style="font-size: clamp(1.1rem, 3.6vw, 1.8rem);">${escapeHtml(title)}</div>
+        <h1 class="neon-title" style="font-size: 1.3rem; margin-bottom: 4px;">Mission Control Workspace <span class="starburst">✦</span></h1>
+        <p class="neon-subtitle">Signed in as ${escapeHtml(user.displayName || user.email)} (${escapeHtml(user.role)}).</p>
+      </div>
+      <button id="logout" type="button">Log Out</button>
+    </header>
+
+    <hr class="neon-divider" />
+
+    ${dashboard}
+  </main>
+
+  <script>
+    ${script}
+
+    document.getElementById('logout').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.assign('/login');
+    });
+  </script>
+</body>
+</html>`, {
     headers: { 'content-type': 'text/html; charset=utf-8' }
   });
 }
@@ -1314,8 +2311,7 @@ async function ensureContestantProfile(env, userId) {
   const existing = await env.DB.prepare('SELECT id, contestant_number, private_token FROM contestants WHERE user_id = ?').bind(userId).first();
   if (existing) return existing;
 
-  const sequence = await env.DB.prepare('SELECT COUNT(*) AS count FROM contestants').first();
-  const contestantNumber = `C-${1001 + (sequence?.count || 0)}`;
+  const contestantNumber = `C-${10000 + Number(userId)}`;
   const privateToken = `contestant-${randomToken()}`;
 
   const insert = await env.DB.prepare(
