@@ -42,12 +42,32 @@ async function routeRequest(request, env) {
   if (request.method === 'GET' && pathname === '/admin') {
     const user = await requireRole(request, env, ['admin'], { allowPasswordResetPending: true });
     if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
-    return renderRolePortal('admin', user);
+    return Response.redirect(new URL('/portal/dashboard', request.url).toString(), 302);
   }
   if (request.method === 'GET' && pathname === '/judge') {
     const user = await requireRole(request, env, ['judge', 'admin'], { allowPasswordResetPending: true });
     if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
-    return renderRolePortal('judge', user);
+    return Response.redirect(new URL('/portal/dashboard', request.url).toString(), 302);
+  }
+  if (request.method === 'GET' && pathname === '/portal/dashboard') {
+    const user = await requireRole(request, env, ['admin', 'judge'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
+    return renderPortalPage(user, 'dashboard');
+  }
+  if (request.method === 'GET' && pathname === '/portal/event-setup') {
+    const user = await requireRole(request, env, ['admin'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
+    return renderPortalPage(user, 'event-setup');
+  }
+  if (request.method === 'GET' && pathname === '/portal/contestant-selection') {
+    const user = await requireRole(request, env, ['admin', 'judge'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
+    return renderPortalPage(user, 'contestant-selection');
+  }
+  if (request.method === 'GET' && pathname === '/portal/user-settings') {
+    const user = await requireRole(request, env, ['admin'], { allowPasswordResetPending: true });
+    if (user.requiresPasswordReset) return Response.redirect(new URL('/password-reset-required', request.url).toString(), 302);
+    return renderPortalPage(user, 'user-settings');
   }
   if (request.method === 'GET' && pathname === '/contestant') {
     const user = await requireRole(request, env, ['contestant'], { allowPasswordResetPending: true });
@@ -138,6 +158,37 @@ async function routeRequest(request, env) {
   if (request.method === 'GET' && pathname === '/judge/schedule') {
     const user = await requireRole(request, env, ['judge', 'admin']);
     return getJudgeSchedule(url, env, user);
+  }
+
+  if (request.method === 'GET' && pathname === '/admin/contestant-users') {
+    const user = await requireRole(request, env, ['admin']);
+    return adminListContestantUsers(url, env, user);
+  }
+  if (request.method === 'POST' && pathname === '/admin/contestant-membership') {
+    const user = await requireRole(request, env, ['admin']);
+    return adminSetContestantMembership(request, env, user);
+  }
+  if (request.method === 'GET' && pathname === '/admin/users') {
+    const user = await requireRole(request, env, ['admin']);
+    return adminListUsers(url, env, user);
+  }
+  if (request.method === 'POST' && pathname === '/admin/users') {
+    const user = await requireRole(request, env, ['admin']);
+    return adminCreateUser(request, env, user);
+  }
+  if (request.method === 'POST' && matchPath(pathname, '/admin/users/:userId/status')) {
+    const user = await requireRole(request, env, ['admin']);
+    const { userId } = extractPathParams(pathname, '/admin/users/:userId/status');
+    return adminSetUserStatus(request, env, user, Number(userId));
+  }
+  if (request.method === 'POST' && matchPath(pathname, '/admin/users/:userId/temp-password')) {
+    const user = await requireRole(request, env, ['admin']);
+    const { userId } = extractPathParams(pathname, '/admin/users/:userId/temp-password');
+    return adminResetTempPassword(request, env, user, Number(userId));
+  }
+  if (request.method === 'POST' && pathname === '/admin/profile') {
+    const user = await requireRole(request, env, ['admin']);
+    return adminUpdateProfile(request, env, user);
   }
 
   if (pathname.startsWith('/admin/')) {
@@ -504,11 +555,68 @@ function getNeonThemeStyles() {
     a {
       color: #bdf6ff;
     }
+    .portal-layout {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .portal-nav {
+      position: sticky;
+      top: 10px;
+    }
+    .portal-nav-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .portal-nav a {
+      display: block;
+      border-radius: 10px;
+      padding: 10px 12px;
+      text-decoration: none;
+      border: 1px solid rgba(0, 255, 255, 0.35);
+      background: rgba(10, 18, 42, 0.66);
+      color: #daf3ff;
+      font-weight: 700;
+    }
+    .portal-nav a.active {
+      border-color: rgba(255, 0, 255, 0.85);
+      box-shadow: 0 0 16px rgba(255, 0, 255, 0.35);
+      background: linear-gradient(90deg, rgba(255, 0, 255, 0.22), rgba(0, 255, 255, 0.18));
+      color: #fff;
+    }
+    .portal-mobile-nav {
+      display: none;
+      margin-bottom: 12px;
+    }
+    select {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(0, 255, 255, 0.45);
+      color: #f2f8ff;
+      background: rgba(8, 14, 33, 0.7);
+      padding: 11px 12px;
+      font: inherit;
+      outline: 0;
+      box-shadow: inset 0 0 14px rgba(0, 255, 255, 0.08);
+    }
     @media (max-width: 760px) {
       body { padding: 10px; }
       .neon-shell { padding: 14px; }
       th,
       td { font-size: 0.82rem; }
+      .portal-layout {
+        grid-template-columns: 1fr;
+      }
+      .portal-nav {
+        display: none;
+      }
+      .portal-mobile-nav {
+        display: block;
+      }
     }
     @media (prefers-reduced-motion: reduce) {
       * {
@@ -888,6 +996,699 @@ function renderRegisterPage() {
         submit.disabled = false;
       }
     });
+  </script>
+</body>
+</html>`, {
+    headers: { 'content-type': 'text/html; charset=utf-8' }
+  });
+}
+
+function renderPortalPage(user, page) {
+  const isJudge = user.role === 'judge';
+  const navItems = [
+    { key: 'dashboard', label: 'Dashboard', href: '/portal/dashboard', roles: ['admin', 'judge'] },
+    { key: 'event-setup', label: 'Event Setup', href: '/portal/event-setup', roles: ['admin'] },
+    { key: 'contestant-selection', label: 'Contestant Selection', href: '/portal/contestant-selection', roles: ['admin', 'judge'] },
+    { key: 'user-settings', label: 'User Settings', href: '/portal/user-settings', roles: ['admin'] }
+  ].filter((item) => item.roles.includes(user.role));
+
+  const activeNav = navItems.find((item) => item.key === page) || navItems[0];
+  const titleByPage = {
+    dashboard: 'Dashboard',
+    'event-setup': 'Event Setup',
+    'contestant-selection': 'Contestant Selection',
+    'user-settings': 'User Settings'
+  };
+  const title = titleByPage[activeNav.key] || 'Portal';
+
+  let content = '';
+  let script = '';
+
+  if (activeNav.key === 'dashboard') {
+    if (isJudge) {
+      content = `
+      <section class="glass-panel controls">
+        <h2>Judge Dashboard</h2>
+        <div class="grid three">
+          <label>Competition ID
+            <input id="competition-id" type="number" min="1" value="1" />
+          </label>
+          <label>Round ID (optional)
+            <input id="round-id" type="number" min="1" placeholder="Any" />
+          </label>
+          <label>Search
+            <input id="search-query" type="text" placeholder="Contestant number or name" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="search-contestants" class="primary" type="button">Search Contestants</button>
+          <button id="load-leaderboard" type="button">Load Leaderboard</button>
+          <button id="load-schedule" type="button">Load Schedule</button>
+        </div>
+        <p id="flash" class="flash"></p>
+      </section>
+
+      <section class="glass-panel">
+        <h2>Contestant Search</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Entry ID</th><th>Contestant #</th><th>Name</th><th>Status</th><th>Advancing</th></tr>
+            </thead>
+            <tbody id="contestant-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="glass-panel">
+        <h2>Leaderboard</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Rank</th><th>Contestant #</th><th>Name</th><th>Avg Score</th><th>Judges Scored</th><th>Advancing</th></tr>
+            </thead>
+            <tbody id="leaderboard-table"></tbody>
+          </table>
+        </div>
+      </section>`;
+
+      script = `
+      const flash = document.getElementById('flash');
+      const contestantTable = document.getElementById('contestant-table');
+      const leaderboardTable = document.getElementById('leaderboard-table');
+      const competitionIdInput = document.getElementById('competition-id');
+      const roundIdInput = document.getElementById('round-id');
+      const searchInput = document.getElementById('search-query');
+
+      const showFlash = (text, isError) => {
+        flash.textContent = text;
+        flash.className = isError ? 'flash error' : 'flash';
+      };
+      const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+      const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+      const fetchJson = async (path) => {
+        const response = await fetch(path);
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'Request failed');
+        return body;
+      };
+      const ids = () => {
+        const competitionId = Number(competitionIdInput.value) || 1;
+        const roundId = roundIdInput.value.trim() ? Number(roundIdInput.value) : null;
+        return { competitionId, roundId };
+      };
+
+      const searchContestants = async () => {
+        try {
+          showFlash('Searching contestants...');
+          const { competitionId, roundId } = ids();
+          const q = encodeURIComponent(searchInput.value.trim());
+          const roundQuery = roundId ? '&roundId=' + roundId : '';
+          const data = await fetchJson('/judge/contestants?competitionId=' + competitionId + roundQuery + '&q=' + q);
+          const rows = data.contestants || [];
+          contestantTable.innerHTML = rows.length ? rows.map((row) => '<tr><td>' + safe(toText(row.entry_id)) + '</td><td>' + safe(toText(row.contestant_number)) + '</td><td>' + safe(toText(row.display_name)) + '</td><td>' + safe(toText(row.status)) + '</td><td>' + (row.is_advancing ? 'Yes' : 'No') + '</td></tr>').join('') : '<tr><td colspan="5">No contestants found.</td></tr>';
+          showFlash('Contestants loaded.');
+        } catch (error) {
+          showFlash(error.message, true);
+        }
+      };
+
+      const loadLeaderboard = async () => {
+        try {
+          showFlash('Loading leaderboard...');
+          const { competitionId, roundId } = ids();
+          const roundQuery = roundId ? '&roundId=' + roundId : '';
+          const data = await fetchJson('/judge/leaderboard?competitionId=' + competitionId + roundQuery);
+          const rows = data.leaderboard || [];
+          leaderboardTable.innerHTML = rows.length ? rows.map((row) => '<tr><td>' + safe(toText(row.rank)) + '</td><td>' + safe(toText(row.contestant_number)) + '</td><td>' + safe(toText(row.contestant_name)) + '</td><td>' + safe(toText(row.average_score)) + '</td><td>' + safe(toText(row.judges_scored)) + '</td><td>' + (row.is_advancing ? 'Yes' : 'No') + '</td></tr>').join('') : '<tr><td colspan="6">No leaderboard data.</td></tr>';
+          showFlash('Leaderboard loaded.');
+        } catch (error) {
+          showFlash(error.message, true);
+        }
+      };
+
+      document.getElementById('search-contestants').addEventListener('click', searchContestants);
+      document.getElementById('load-leaderboard').addEventListener('click', loadLeaderboard);
+      document.getElementById('load-schedule').addEventListener('click', () => showFlash('Use Contestant Selection page for read-only schedule context.'));
+      searchContestants();
+      loadLeaderboard();`;
+    } else {
+      content = `
+      <section class="glass-panel controls">
+        <h2>Dashboard Filters</h2>
+        <div class="grid two">
+          <label>Event ID
+            <input id="event-id" type="number" min="1" value="1" />
+          </label>
+          <label>Competition ID
+            <input id="competition-id" type="number" min="1" value="1" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="load-dashboard" class="primary" type="button">Load Dashboard</button>
+          <button id="load-schedule" type="button">Load Schedule</button>
+        </div>
+        <div class="row">
+          <a id="csv-contestants" href="/admin/export/contestants.csv?competitionId=1">Contestants CSV</a>
+          <a id="csv-scores" href="/admin/export/scores.csv?competitionId=1">Scores CSV</a>
+          <a id="csv-schedule" href="/admin/export/schedule.csv?competitionId=1">Schedule CSV</a>
+        </div>
+        <p id="flash" class="flash"></p>
+      </section>
+      <section class="glass-panel"><h2>Totals</h2><div id="totals" class="cards"></div></section>
+      <section class="glass-panel"><h2>Round Performance</h2><div class="table-wrap"><table><thead><tr><th>Round</th><th>Contestants</th><th>Scores Submitted</th><th>Average Score</th></tr></thead><tbody id="round-table"></tbody></table></div></section>
+      <section class="glass-panel"><h2>Judge Progress</h2><div class="table-wrap"><table><thead><tr><th>Judge</th><th>Assignments</th><th>Scores Submitted</th></tr></thead><tbody id="judge-table"></tbody></table></div></section>
+      <section class="glass-panel"><h2>Schedule</h2><div class="table-wrap"><table><thead><tr><th>Slot</th><th>Round</th><th>Judging Time</th><th>Location</th><th>Reserved</th><th>Contestants</th></tr></thead><tbody id="schedule-table"></tbody></table></div></section>`;
+
+      script = `
+      const flash = document.getElementById('flash');
+      const totalsNode = document.getElementById('totals');
+      const roundTable = document.getElementById('round-table');
+      const judgeTable = document.getElementById('judge-table');
+      const scheduleTable = document.getElementById('schedule-table');
+      const eventIdInput = document.getElementById('event-id');
+      const competitionIdInput = document.getElementById('competition-id');
+      const csvContestants = document.getElementById('csv-contestants');
+      const csvScores = document.getElementById('csv-scores');
+      const csvSchedule = document.getElementById('csv-schedule');
+      const showFlash = (text, isError) => { flash.textContent = text; flash.className = isError ? 'flash error' : 'flash'; };
+      const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+      const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+      const fetchJson = async (path) => { const response = await fetch(path); const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Request failed'); return body; };
+      const updateCsvLinks = () => {
+        const competitionId = Number(competitionIdInput.value) || 1;
+        csvContestants.href = '/admin/export/contestants.csv?competitionId=' + competitionId;
+        csvScores.href = '/admin/export/scores.csv?competitionId=' + competitionId;
+        csvSchedule.href = '/admin/export/schedule.csv?competitionId=' + competitionId;
+      };
+      const loadDashboard = async () => {
+        try {
+          showFlash('Loading dashboard...');
+          const eventId = Number(eventIdInput.value) || 1;
+          const data = await fetchJson('/admin/dashboard?eventId=' + eventId);
+          const totals = data.totals || {};
+          const cards = [['Total Entries', toText(totals.total_entries)], ['No-Shows', toText(totals.no_show_count)], ['Average Score', toText(totals.average_score)], ['Judges Active', toText(totals.judges_active)]];
+          totalsNode.innerHTML = cards.map(([label, value]) => '<article class="card"><h3>' + safe(label) + '</h3><p>' + safe(value) + '</p></article>').join('');
+          const perRound = data.perRound || [];
+          roundTable.innerHTML = perRound.length ? perRound.map((row) => '<tr><td>' + safe(toText(row.round_name)) + '</td><td>' + safe(toText(row.contestants)) + '</td><td>' + safe(toText(row.scores_submitted)) + '</td><td>' + safe(toText(row.average_round_score)) + '</td></tr>').join('') : '<tr><td colspan="4">No round data.</td></tr>';
+          const judgeProgress = data.judgeProgress || [];
+          judgeTable.innerHTML = judgeProgress.length ? judgeProgress.map((row) => '<tr><td>' + safe(toText(row.display_name)) + '</td><td>' + safe(toText(row.assignment_count)) + '</td><td>' + safe(toText(row.score_count)) + '</td></tr>').join('') : '<tr><td colspan="3">No judge progress found.</td></tr>';
+          showFlash('Dashboard loaded.');
+        } catch (error) { showFlash(error.message, true); }
+      };
+      const loadSchedule = async () => {
+        try {
+          showFlash('Loading schedule...');
+          const competitionId = Number(competitionIdInput.value) || 1;
+          const data = await fetchJson('/admin/schedule?competitionId=' + competitionId);
+          const rows = data.schedule || [];
+          scheduleTable.innerHTML = rows.length ? rows.map((row) => '<tr><td>' + safe(toText(row.slot_id)) + '</td><td>' + safe(toText(row.round_id)) + '</td><td>' + safe(toText(row.judging_time)) + '</td><td>' + safe(toText(row.location)) + '</td><td>' + safe(toText(row.reserved_count)) + '/' + safe(toText(row.capacity)) + '</td><td>' + safe(toText(row.contestant_numbers)) + '</td></tr>').join('') : '<tr><td colspan="6">No schedule slots found.</td></tr>';
+          showFlash('Schedule loaded.');
+        } catch (error) { showFlash(error.message, true); }
+      };
+      competitionIdInput.addEventListener('input', updateCsvLinks);
+      document.getElementById('load-dashboard').addEventListener('click', loadDashboard);
+      document.getElementById('load-schedule').addEventListener('click', loadSchedule);
+      updateCsvLinks();
+      loadDashboard();
+      loadSchedule();`;
+    }
+  }
+
+  if (activeNav.key === 'event-setup') {
+    content = `
+    <section class="glass-panel controls">
+      <h2>Event Setup</h2>
+      <p class="neon-subtitle">Create or update events, competitions, rounds, branding, and contestant questions.</p>
+      <div class="grid two">
+        <label>Event ID (optional for update)
+          <input id="event-id" type="number" min="1" placeholder="Create if empty" />
+        </label>
+        <label>Event Name
+          <input id="event-name" type="text" placeholder="Tremendicon 2026" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Event Slug
+          <input id="event-slug" type="text" placeholder="tremendicon-2026" />
+        </label>
+        <label>Description
+          <input id="event-description" type="text" placeholder="Main event description" />
+        </label>
+      </div>
+      <div class="row"><button id="save-event" type="button" class="primary">Save Event</button></div>
+      <hr class="neon-divider" />
+      <div class="grid three">
+        <label>Competition ID (optional for update)
+          <input id="competition-id" type="number" min="1" placeholder="Create if empty" />
+        </label>
+        <label>Competition Name
+          <input id="competition-name" type="text" placeholder="Armor Division" />
+        </label>
+        <label>Competition Slug
+          <input id="competition-slug" type="text" placeholder="armor-division" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Event ID (for competition)
+          <input id="competition-event-id" type="number" min="1" value="1" />
+        </label>
+        <label>Division
+          <input id="competition-division" type="text" placeholder="Master" />
+        </label>
+      </div>
+      <div class="row"><button id="save-competition" type="button">Save Competition</button></div>
+      <hr class="neon-divider" />
+      <div class="grid three">
+        <label>Round ID (optional for update)
+          <input id="round-id" type="number" min="1" placeholder="Create if empty" />
+        </label>
+        <label>Competition ID (for round)
+          <input id="round-competition-id" type="number" min="1" value="1" />
+        </label>
+        <label>Round Name
+          <input id="round-name" type="text" placeholder="Prelims" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Round Number
+          <input id="round-number" type="number" min="1" value="1" />
+        </label>
+        <label>Branding Accent (hex)
+          <input id="branding-accent" type="text" placeholder="#ff00ff" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="save-round" type="button">Save Round</button>
+        <button id="save-branding" type="button">Save Branding/Content</button>
+      </div>
+      <hr class="neon-divider" />
+      <div class="grid two">
+        <label>Question Competition ID
+          <input id="field-competition-id" type="number" min="1" value="1" />
+        </label>
+        <label>Question Key
+          <input id="field-key" type="text" placeholder="character_name" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Question Label
+          <input id="field-label" type="text" placeholder="Character Name" />
+        </label>
+        <label>Field Type
+          <select id="field-type">
+            <option value="short_text">short_text</option>
+            <option value="long_text">long_text</option>
+            <option value="multiple_choice">multiple_choice</option>
+            <option value="checkbox_list">checkbox_list</option>
+            <option value="numeric">numeric</option>
+            <option value="date_time">date_time</option>
+            <option value="external_link">external_link</option>
+            <option value="media_link">media_link</option>
+            <option value="consent_checkbox">consent_checkbox</option>
+            <option value="social_links">social_links</option>
+          </select>
+        </label>
+      </div>
+      <div class="row"><button id="save-question" type="button">Save Contestant Question</button></div>
+      <p id="flash" class="flash"></p>
+    </section>`;
+
+    script = `
+    const flash = document.getElementById('flash');
+    const showFlash = (text, isError) => { flash.textContent = text; flash.className = isError ? 'flash error' : 'flash'; };
+    const fetchJson = async (path, options = {}) => {
+      const response = await fetch(path, options);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'Request failed');
+      return body;
+    };
+
+    document.getElementById('save-event').addEventListener('click', async () => {
+      try {
+        const payload = {
+          id: Number(document.getElementById('event-id').value) || undefined,
+          name: document.getElementById('event-name').value.trim(),
+          slug: document.getElementById('event-slug').value.trim(),
+          description: document.getElementById('event-description').value.trim()
+        };
+        await fetchJson('/admin/events', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('Event saved.');
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    document.getElementById('save-competition').addEventListener('click', async () => {
+      try {
+        const payload = {
+          id: Number(document.getElementById('competition-id').value) || undefined,
+          eventId: Number(document.getElementById('competition-event-id').value) || 1,
+          name: document.getElementById('competition-name').value.trim(),
+          slug: document.getElementById('competition-slug').value.trim(),
+          division: document.getElementById('competition-division').value.trim() || 'General'
+        };
+        await fetchJson('/admin/competitions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('Competition saved.');
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    document.getElementById('save-round').addEventListener('click', async () => {
+      try {
+        const payload = {
+          id: Number(document.getElementById('round-id').value) || undefined,
+          competitionId: Number(document.getElementById('round-competition-id').value) || 1,
+          name: document.getElementById('round-name').value.trim(),
+          roundNumber: Number(document.getElementById('round-number').value) || 1
+        };
+        await fetchJson('/admin/rounds', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('Round saved.');
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    document.getElementById('save-branding').addEventListener('click', async () => {
+      try {
+        const eventId = Number(document.getElementById('competition-event-id').value) || 1;
+        const accent = document.getElementById('branding-accent').value.trim();
+        const payload = {
+          eventId,
+          branding: accent ? { accent } : {},
+          homeContent: { hero: document.getElementById('event-name').value.trim() || 'Event Home' }
+        };
+        await fetchJson('/admin/event-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('Branding/content settings saved.');
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    document.getElementById('save-question').addEventListener('click', async () => {
+      try {
+        const payload = {
+          competitionId: Number(document.getElementById('field-competition-id').value) || 1,
+          fieldKey: document.getElementById('field-key').value.trim(),
+          label: document.getElementById('field-label').value.trim(),
+          fieldType: document.getElementById('field-type').value
+        };
+        await fetchJson('/admin/form-fields', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('Contestant question saved.');
+      } catch (error) { showFlash(error.message, true); }
+    });`;
+  }
+
+  if (activeNav.key === 'contestant-selection') {
+    if (isJudge) {
+      content = `
+      <section class="glass-panel controls">
+        <h2>Contestant Selection (Read Only)</h2>
+        <div class="grid three">
+          <label>Competition ID
+            <input id="competition-id" type="number" min="1" value="1" />
+          </label>
+          <label>Round ID (optional)
+            <input id="round-id" type="number" min="1" placeholder="Any" />
+          </label>
+          <label>Search
+            <input id="search-query" type="text" placeholder="Contestant number or name" />
+          </label>
+        </div>
+        <div class="row"><button id="search" type="button" class="primary">Search</button></div>
+        <p id="flash" class="flash"></p>
+      </section>
+      <section class="glass-panel">
+        <h2>Results</h2>
+        <div class="table-wrap"><table><thead><tr><th>Entry ID</th><th>Contestant #</th><th>Name</th><th>Status</th><th>Advancing</th></tr></thead><tbody id="rows"></tbody></table></div>
+      </section>`;
+
+      script = `
+      const flash = document.getElementById('flash');
+      const rowsNode = document.getElementById('rows');
+      const showFlash = (text, isError) => { flash.textContent = text; flash.className = isError ? 'flash error' : 'flash'; };
+      const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+      const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+      const fetchJson = async (path) => { const response = await fetch(path); const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Request failed'); return body; };
+      const search = async () => {
+        try {
+          showFlash('Loading contestants...');
+          const competitionId = Number(document.getElementById('competition-id').value) || 1;
+          const roundIdText = document.getElementById('round-id').value.trim();
+          const q = encodeURIComponent(document.getElementById('search-query').value.trim());
+          const roundQuery = roundIdText ? '&roundId=' + Number(roundIdText) : '';
+          const data = await fetchJson('/judge/contestants?competitionId=' + competitionId + roundQuery + '&q=' + q);
+          const rows = data.contestants || [];
+          rowsNode.innerHTML = rows.length ? rows.map((row) => '<tr><td>' + safe(toText(row.entry_id)) + '</td><td>' + safe(toText(row.contestant_number)) + '</td><td>' + safe(toText(row.display_name)) + '</td><td>' + safe(toText(row.status)) + '</td><td>' + (row.is_advancing ? 'Yes' : 'No') + '</td></tr>').join('') : '<tr><td colspan="5">No results.</td></tr>';
+          showFlash('Loaded.');
+        } catch (error) { showFlash(error.message, true); }
+      };
+      document.getElementById('search').addEventListener('click', search);
+      search();`;
+    } else {
+      content = `
+      <section class="glass-panel controls">
+        <h2>Contestant Selection</h2>
+        <div class="grid two">
+          <label>Competition ID
+            <input id="competition-id" type="number" min="1" value="1" />
+          </label>
+          <label>Search Contestants
+            <input id="search-query" type="text" placeholder="Name or email" />
+          </label>
+        </div>
+        <div class="row"><button id="search" class="primary" type="button">Search</button></div>
+        <p id="flash" class="flash"></p>
+      </section>
+      <section class="glass-panel">
+        <h2>Contestants</h2>
+        <div class="table-wrap"><table><thead><tr><th>User ID</th><th>Contestant #</th><th>Name</th><th>Email</th><th>In Competition</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
+      </section>`;
+
+      script = `
+      const flash = document.getElementById('flash');
+      const rowsNode = document.getElementById('rows');
+      const showFlash = (text, isError) => { flash.textContent = text; flash.className = isError ? 'flash error' : 'flash'; };
+      const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+      const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+      const fetchJson = async (path, options = {}) => { const response = await fetch(path, options); const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Request failed'); return body; };
+
+      const load = async () => {
+        try {
+          showFlash('Searching contestants...');
+          const competitionId = Number(document.getElementById('competition-id').value) || 1;
+          const q = encodeURIComponent(document.getElementById('search-query').value.trim());
+          const data = await fetchJson('/admin/contestant-users?competitionId=' + competitionId + '&q=' + q);
+          const rows = data.users || [];
+          rowsNode.innerHTML = rows.length ? rows.map((row) => {
+            const action = row.entry_id ? '<button data-action="remove" data-user-id="' + row.user_id + '">Remove</button>' : '<button data-action="add" data-user-id="' + row.user_id + '">Add</button>';
+            return '<tr><td>' + safe(toText(row.user_id)) + '</td><td>' + safe(toText(row.contestant_number)) + '</td><td>' + safe(toText(row.display_name)) + '</td><td>' + safe(toText(row.email)) + '</td><td>' + (row.entry_id ? 'Yes' : 'No') + '</td><td>' + action + '</td></tr>';
+          }).join('') : '<tr><td colspan="6">No contestants found.</td></tr>';
+          showFlash('Contestants loaded.');
+        } catch (error) { showFlash(error.message, true); }
+      };
+
+      rowsNode.addEventListener('click', async (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        try {
+          const competitionId = Number(document.getElementById('competition-id').value) || 1;
+          const userId = Number(button.getAttribute('data-user-id'));
+          const action = button.getAttribute('data-action');
+          await fetchJson('/admin/contestant-membership', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ competitionId, userId, action })
+          });
+          showFlash(action === 'add' ? 'Contestant added.' : 'Contestant removed.');
+          await load();
+        } catch (error) { showFlash(error.message, true); }
+      });
+
+      document.getElementById('search').addEventListener('click', load);
+      load();`;
+    }
+  }
+
+  if (activeNav.key === 'user-settings') {
+    content = `
+    <section class="glass-panel controls">
+      <h2>User Settings</h2>
+      <div class="grid two">
+        <label>Display Name
+          <input id="new-display-name" type="text" placeholder="Judge Nova" />
+        </label>
+        <label>Email
+          <input id="new-email" type="email" placeholder="judge@tremendicon.com" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Temporary Password
+          <input id="new-password" type="password" placeholder="TempPass123" />
+        </label>
+        <label>Role
+          <select id="new-role"><option value="judge">judge</option><option value="admin">admin</option></select>
+        </label>
+      </div>
+      <div class="row"><button id="create-user" type="button" class="primary">Create User</button></div>
+      <hr class="neon-divider" />
+      <div class="grid two">
+        <label>Search Users
+          <input id="search-query" type="text" placeholder="Name or email" />
+        </label>
+        <label>Role Filter
+          <select id="role-filter"><option value="">all</option><option value="admin">admin</option><option value="judge">judge</option><option value="contestant">contestant</option></select>
+        </label>
+      </div>
+      <div class="row"><button id="load-users" type="button">Load Users</button></div>
+      <hr class="neon-divider" />
+      <h3 style="margin: 0 0 8px;">My Profile</h3>
+      <div class="grid two">
+        <label>New Display Name
+          <input id="profile-display-name" type="text" placeholder="Optional" />
+        </label>
+        <label>New Email
+          <input id="profile-email" type="email" placeholder="Optional" />
+        </label>
+      </div>
+      <div class="grid two">
+        <label>Current Password
+          <input id="profile-current-password" type="password" />
+        </label>
+        <label>New Password
+          <input id="profile-new-password" type="password" minlength="8" />
+        </label>
+      </div>
+      <div class="row"><button id="save-profile" type="button">Save Profile</button></div>
+      <p id="flash" class="flash"></p>
+    </section>
+
+    <section class="glass-panel">
+      <h2>Users</h2>
+      <div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>Actions</th></tr></thead><tbody id="users-table"></tbody></table></div>
+    </section>`;
+
+    script = `
+    const flash = document.getElementById('flash');
+    const usersTable = document.getElementById('users-table');
+    const showFlash = (text, isError) => { flash.textContent = text; flash.className = isError ? 'flash error' : 'flash'; };
+    const safe = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+    const toText = (value) => value === null || value === undefined || value === '' ? '-' : String(value);
+    const fetchJson = async (path, options = {}) => { const response = await fetch(path, options); const body = await response.json(); if (!response.ok) throw new Error(body.error || 'Request failed'); return body; };
+
+    const loadUsers = async () => {
+      try {
+        showFlash('Loading users...');
+        const q = encodeURIComponent(document.getElementById('search-query').value.trim());
+        const role = encodeURIComponent(document.getElementById('role-filter').value);
+        const data = await fetchJson('/admin/users?q=' + q + '&role=' + role);
+        const rows = data.users || [];
+        usersTable.innerHTML = rows.length ? rows.map((row) => '<tr><td>' + safe(toText(row.id)) + '</td><td>' + safe(toText(row.display_name)) + '</td><td>' + safe(toText(row.email)) + '</td><td>' + safe(toText(row.role)) + '</td><td>' + (row.is_active ? 'Yes' : 'No') + '</td><td><button data-action="toggle" data-user-id="' + row.id + '" data-active="' + (row.is_active ? '1' : '0') + '">' + (row.is_active ? 'Disable' : 'Enable') + '</button> <button data-action="reset" data-user-id="' + row.id + '">Reset Temp Password</button></td></tr>').join('') : '<tr><td colspan="6">No users found.</td></tr>';
+        showFlash('Users loaded.');
+      } catch (error) { showFlash(error.message, true); }
+    };
+
+    document.getElementById('create-user').addEventListener('click', async () => {
+      try {
+        const payload = {
+          displayName: document.getElementById('new-display-name').value.trim(),
+          email: document.getElementById('new-email').value.trim(),
+          tempPassword: document.getElementById('new-password').value,
+          role: document.getElementById('new-role').value
+        };
+        await fetchJson('/admin/users', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('User created. Temporary password reset required on first login.');
+        loadUsers();
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    document.getElementById('save-profile').addEventListener('click', async () => {
+      try {
+        const payload = {
+          displayName: document.getElementById('profile-display-name').value.trim(),
+          email: document.getElementById('profile-email').value.trim(),
+          currentPassword: document.getElementById('profile-current-password').value,
+          newPassword: document.getElementById('profile-new-password').value
+        };
+        await fetchJson('/admin/profile', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+        showFlash('Profile updated.');
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    usersTable.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const userId = Number(button.getAttribute('data-user-id'));
+      const action = button.getAttribute('data-action');
+
+      try {
+        if (action === 'toggle') {
+          const isActive = button.getAttribute('data-active') === '1';
+          await fetchJson('/admin/users/' + userId + '/status', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ isActive: !isActive })
+          });
+          showFlash('User status updated.');
+        }
+        if (action === 'reset') {
+          const tempPassword = prompt('Enter a temporary password (min 8 chars):');
+          if (!tempPassword) return;
+          await fetchJson('/admin/users/' + userId + '/temp-password', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ tempPassword })
+          });
+          showFlash('Temporary password set. User must reset on first login.');
+        }
+        loadUsers();
+      } catch (error) { showFlash(error.message, true); }
+    });
+
+    document.getElementById('load-users').addEventListener('click', loadUsers);
+    loadUsers();`;
+  }
+
+  const navHtml = navItems.map((item) => `<li><a class="${item.key === activeNav.key ? 'active' : ''}" href="${item.href}">${escapeHtml(item.label)}</a></li>`).join('');
+  const optionsHtml = navItems.map((item) => `<option value="${item.href}" ${item.key === activeNav.key ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('');
+
+  return new Response(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>${getNeonThemeStyles()}</style>
+</head>
+<body>
+  <main class="neon-shell">
+    <header>
+      <div>
+        <div class="chrome-logo" style="font-size: clamp(1.1rem, 3.6vw, 1.8rem);">${escapeHtml(title)}</div>
+        <h1 class="neon-title" style="font-size: 1.3rem; margin-bottom: 4px;">Mission Control Workspace <span class="starburst">✦</span></h1>
+        <p class="neon-subtitle">Signed in as ${escapeHtml(user.displayName || user.email)} (${escapeHtml(user.role)}).</p>
+      </div>
+      <button id="logout" type="button">Log Out</button>
+    </header>
+    <hr class="neon-divider" />
+
+    <div class="portal-mobile-nav">
+      <label for="mobile-nav">Navigate</label>
+      <select id="mobile-nav">${optionsHtml}</select>
+    </div>
+
+    <div class="portal-layout">
+      <aside class="portal-nav glass-panel">
+        <h2 style="margin-top: 0;">Menu</h2>
+        <ul class="portal-nav-list">${navHtml}</ul>
+      </aside>
+      <section>
+        ${content}
+      </section>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById('logout').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.assign('/login');
+    });
+    const mobileNav = document.getElementById('mobile-nav');
+    if (mobileNav) mobileNav.addEventListener('change', () => { window.location.assign(mobileNav.value); });
+    ${script}
   </script>
 </body>
 </html>`, {
@@ -1955,6 +2756,217 @@ async function getJudgeSchedule(url, env, user) {
   ).bind(competitionId).all();
 
   return jsonResponse({ schedule: rows.results || [] });
+}
+
+async function adminListContestantUsers(url, env, _user) {
+  const competitionId = Number(url.searchParams.get('competitionId'));
+  const q = (url.searchParams.get('q') || '').trim();
+  if (!competitionId) return jsonResponse({ error: 'competitionId is required' }, 400);
+
+  const rows = await env.DB.prepare(
+    `SELECT u.id AS user_id,
+            u.display_name,
+            u.email,
+            ct.contestant_number,
+            e.id AS entry_id,
+            e.status
+     FROM users u
+     LEFT JOIN contestants ct ON ct.user_id = u.id
+     LEFT JOIN entries e ON e.contestant_id = ct.id AND e.competition_id = ?
+     WHERE u.role = 'contestant'
+       AND (u.display_name LIKE ? OR u.email LIKE ?)
+     ORDER BY u.display_name
+     LIMIT 200`
+  ).bind(competitionId, `%${q}%`, `%${q}%`).all();
+
+  return jsonResponse({ users: rows.results || [] });
+}
+
+async function adminSetContestantMembership(request, env, user) {
+  const payload = await parseJsonBody(request);
+  const competitionId = Number(payload.competitionId);
+  const userId = Number(payload.userId);
+  const action = String(payload.action || '').trim();
+  if (!competitionId || !userId || !['add', 'remove'].includes(action)) {
+    return jsonResponse({ error: 'competitionId, userId, and action(add|remove) are required' }, 400);
+  }
+
+  const targetUser = await env.DB.prepare('SELECT id, role FROM users WHERE id = ?').bind(userId).first();
+  if (!targetUser || targetUser.role !== 'contestant') return jsonResponse({ error: 'Target user must be a contestant' }, 400);
+
+  const competition = await env.DB.prepare('SELECT id FROM competitions WHERE id = ?').bind(competitionId).first();
+  if (!competition) return jsonResponse({ error: 'Competition not found' }, 404);
+
+  const contestant = await ensureContestantProfile(env, userId);
+  const existing = await env.DB.prepare('SELECT id FROM entries WHERE competition_id = ? AND contestant_id = ?').bind(competitionId, contestant.id).first();
+
+  if (action === 'add') {
+    if (!existing) {
+      await env.DB.prepare(
+        `INSERT INTO entries (competition_id, contestant_id, status, submission_json, private_results_token)
+         VALUES (?, ?, 'draft', '{}', ?)`
+      ).bind(competitionId, contestant.id, `entry-${randomToken()}`).run();
+    }
+    await logAudit(env, {
+      actorUserId: user.id,
+      action: 'contestant_membership_added',
+      competitionId,
+      targetType: 'contestant',
+      targetId: String(contestant.id),
+      details: { userId }
+    });
+    return jsonResponse({ message: 'Contestant added to competition' });
+  }
+
+  if (existing) {
+    await env.DB.prepare('DELETE FROM entries WHERE id = ?').bind(existing.id).run();
+  }
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: 'contestant_membership_removed',
+    competitionId,
+    targetType: 'contestant',
+    targetId: String(contestant.id),
+    details: { userId }
+  });
+  return jsonResponse({ message: 'Contestant removed from competition' });
+}
+
+async function adminListUsers(url, env, _user) {
+  const q = (url.searchParams.get('q') || '').trim();
+  const role = (url.searchParams.get('role') || '').trim();
+  const rows = await env.DB.prepare(
+    `SELECT id, display_name, email, role, is_active, created_at
+     FROM users
+     WHERE (? = '' OR role = ?)
+       AND (display_name LIKE ? OR email LIKE ?)
+     ORDER BY created_at DESC
+     LIMIT 300`
+  ).bind(role, role, `%${q}%`, `%${q}%`).all();
+  return jsonResponse({ users: rows.results || [] });
+}
+
+async function adminCreateUser(request, env, user) {
+  const payload = await parseJsonBody(request);
+  const displayName = String(payload.displayName || '').trim();
+  const email = normalizeEmail(payload.email);
+  const tempPassword = String(payload.tempPassword || '');
+  const role = String(payload.role || '').trim();
+
+  if (!displayName || !email || tempPassword.length < 8 || !['admin', 'judge'].includes(role)) {
+    return jsonResponse({ error: 'displayName, email, tempPassword (min 8), and role(admin|judge) are required' }, 400);
+  }
+
+  const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+  if (existing) return jsonResponse({ error: 'Email already registered' }, 409);
+
+  const passwordSalt = generatePasswordSalt();
+  const passwordHash = await hashPassword(tempPassword, passwordSalt);
+  const insert = await env.DB.prepare(
+    `INSERT INTO users (email, password_salt, password_hash, role, display_name, password_reset_required)
+     VALUES (?, ?, ?, ?, ?, 1)`
+  ).bind(email, passwordSalt, passwordHash, role, displayName).run();
+
+  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(insert.meta.last_row_id).run();
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: 'user_created',
+    targetType: 'user',
+    targetId: String(insert.meta.last_row_id),
+    details: { email, role, forcedReset: true }
+  });
+  return jsonResponse({ message: 'User created', userId: insert.meta.last_row_id }, 201);
+}
+
+async function adminSetUserStatus(request, env, user, userId) {
+  if (!userId) return jsonResponse({ error: 'userId is required' }, 400);
+  const payload = await parseJsonBody(request);
+  const isActive = payload.isActive ? 1 : 0;
+
+  await env.DB.prepare('UPDATE users SET is_active = ? WHERE id = ?').bind(isActive, userId).run();
+  if (!isActive) {
+    await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+  }
+
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: 'user_status_changed',
+    targetType: 'user',
+    targetId: String(userId),
+    details: { isActive: Boolean(isActive) }
+  });
+  return jsonResponse({ message: 'User status updated' });
+}
+
+async function adminResetTempPassword(request, env, user, userId) {
+  if (!userId) return jsonResponse({ error: 'userId is required' }, 400);
+  const payload = await parseJsonBody(request);
+  const tempPassword = String(payload.tempPassword || '');
+  if (tempPassword.length < 8) return jsonResponse({ error: 'tempPassword must be at least 8 characters' }, 400);
+
+  const row = await env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(userId).first();
+  if (!row) return jsonResponse({ error: 'User not found' }, 404);
+
+  const salt = generatePasswordSalt();
+  const hash = await hashPassword(tempPassword, salt);
+  await env.DB.prepare(
+    'UPDATE users SET password_salt = ?, password_hash = ?, password_reset_required = 1 WHERE id = ?'
+  ).bind(salt, hash, userId).run();
+  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId).run();
+
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: 'user_temp_password_reset',
+    targetType: 'user',
+    targetId: String(userId),
+    details: { forcedReset: true }
+  });
+  return jsonResponse({ message: 'Temporary password set' });
+}
+
+async function adminUpdateProfile(request, env, user) {
+  const payload = await parseJsonBody(request);
+  const displayName = String(payload.displayName || '').trim();
+  const email = payload.email ? normalizeEmail(payload.email) : null;
+  const currentPassword = String(payload.currentPassword || '');
+  const newPassword = String(payload.newPassword || '');
+
+  const existing = await env.DB.prepare('SELECT id, email, password_salt, password_hash FROM users WHERE id = ?').bind(user.id).first();
+  if (!existing) return jsonResponse({ error: 'User not found' }, 404);
+
+  if (newPassword) {
+    if (newPassword.length < 8) return jsonResponse({ error: 'newPassword must be at least 8 characters' }, 400);
+    if (!currentPassword) return jsonResponse({ error: 'currentPassword is required to change password' }, 400);
+    const currentHash = await hashPassword(currentPassword, existing.password_salt);
+    if (currentHash !== existing.password_hash) return jsonResponse({ error: 'Current password is incorrect' }, 401);
+  }
+
+  let nextSalt = existing.password_salt;
+  let nextHash = existing.password_hash;
+  if (newPassword) {
+    nextSalt = generatePasswordSalt();
+    nextHash = await hashPassword(newPassword, nextSalt);
+  }
+
+  await env.DB.prepare(
+    `UPDATE users
+     SET display_name = COALESCE(?, display_name),
+         email = COALESCE(?, email),
+         password_salt = ?,
+         password_hash = ?,
+         password_reset_required = 0
+     WHERE id = ?`
+  ).bind(displayName || null, email || null, nextSalt, nextHash, user.id).run();
+
+  await logAudit(env, {
+    actorUserId: user.id,
+    action: 'profile_updated',
+    targetType: 'user',
+    targetId: String(user.id),
+    details: { displayNameChanged: Boolean(displayName), emailChanged: Boolean(email), passwordChanged: Boolean(newPassword) }
+  });
+
+  return jsonResponse({ message: 'Profile updated' });
 }
 
 async function upsertEvent(request, env, user) {
