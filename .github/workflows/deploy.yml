@@ -29,6 +29,17 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Debug environment
+        run: |
+          echo "Database ID length: ${#CLOUDFLARE_D1_DATABASE_ID}"
+          echo "Database ID (first 8 chars): ${CLOUDFLARE_D1_DATABASE_ID:0:8}"
+          if [ -z "$CLOUDFLARE_D1_DATABASE_ID" ]; then
+            echo "ERROR: CLOUDFLARE_D1_DATABASE_ID is empty!"
+            exit 1
+          fi
+        env:
+          CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
+
       - name: Prepare production config
         run: |
           python3 <<'EOF'
@@ -36,19 +47,23 @@ import os
 import re
 
 db_id = os.environ.get('CLOUDFLARE_D1_DATABASE_ID', '').strip()
+print(f'Python sees DB ID length: {len(db_id)}')
+print(f'DB ID empty: {not db_id}')
+
 if not db_id:
     print('ERROR: CLOUDFLARE_D1_DATABASE_ID is not set')
     exit(1)
 
 with open('wrangler.toml', 'r') as f:
     config = f.read()
+    print(f'Original config length: {len(config)}')
 
 config = re.sub(r'database_id = "[^"]*"', f'database_id = "{db_id}"', config)
 
 with open('wrangler.toml', 'w') as f:
     f.write(config)
 
-print(f'✓ Updated database_id')
+print(f'✓ Updated database_id to: {db_id[:8]}...')
 EOF
         env:
           CLOUDFLARE_D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_DATABASE_ID }}
